@@ -1,0 +1,55 @@
+# Python cache/runtime
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments and local dependency caches
+.venv/
+venv/
+env/
+.local_deps/
+
+# Local diagnostics and generated scratch output
+diagnostics/
+tmp_video_samples/
+tools/__pycache__/
+tools/_*.png
+tools/_*.jpg
+tools/_*.jpeg
+
+# Raw/source asset packs and intermediate generated material
+assets/polar_bear/actions/
+assets/polar_bear/fat_animal_polar.zip
+assets/polar_bear/fat_animal_polar/
+assets/polar_bear/generated_sheets/
+assets/polar_bear/tmp_raw_cells/
+assets/polar_bear/generated_*.png
+
+# Keep only the runtime action frames used by the current role config.
+assets/polar_bear/role/PolarBear/action/*.png
+!assets/polar_bear/role/PolarBear/action/video2528_idle_seamless_v1_*.png
+!assets/polar_bear/role/PolarBear/action/clean_walk_left_v1_*.png
+!assets/polar_bear/role/PolarBear/action/clean_walk_right_v1_*.png
+!assets/polar_bear/role/PolarBear/action/clean_wave_v1_*.png
+!assets/polar_bear/role/PolarBear/action/clean_jump_v1_*.png
+!assets/polar_bear/role/PolarBear/action/clean_touch_v1_*.png
+!assets/polar_bear/role/PolarBear/action/video5141_sleep_prepare_stable_v1_*.png
+!assets/polar_bear/role/PolarBear/action/video5141_sleep_loop_stable_v1_*.png
+!assets/polar_bear/role/PolarBear/action/video_drag_smooth_v1_*.png
+
+# IDE/editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

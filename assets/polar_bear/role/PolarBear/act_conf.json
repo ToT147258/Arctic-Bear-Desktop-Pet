@@ -1,0 +1,67 @@
+{
+  "default": {
+    "images": "video2528_idle_seamless_v1",
+    "act_num": 1,
+    "frame_refresh": 0.04
+  },
+  "blink": {
+    "images": "video2528_idle_seamless_v1",
+    "act_num": 1,
+    "frame_refresh": 0.04
+  },
+  "left_walk": {
+    "images": "clean_walk_left_v1",
+    "act_num": 1,
+    "need_move": true,
+    "direction": "left",
+    "frame_move": 2.8,
+    "move_every_frames": 1,
+    "frame_refresh": 0.04,
+    "loop": true,
+    "max_cycles": 1
+  },
+  "right_walk": {
+    "images": "clean_walk_right_v1",
+    "act_num": 1,
+    "need_move": true,
+    "direction": "right",
+    "frame_move": 2.8,
+    "move_every_frames": 1,
+    "frame_refresh": 0.04,
+    "loop": true,
+    "max_cycles": 1
+  },
+  "wave": {
+    "images": "clean_wave_v1",
+    "act_num": 1,
+    "frame_refresh": 0.05
+  },
+  "jump": {
+    "images": "clean_jump_v1",
+    "act_num": 1,
+    "frame_refresh": 0.055
+  },
+  "touch": {
+    "images": "clean_touch_v1",
+    "act_num": 1,
+    "frame_refresh": 0.045
+  },
+  "sleep": {
+    "images": "video5141_sleep_loop_stable_v1",
+    "act_num": 2,
+    "frame_refresh": 0.04,
+    "loop": false
+  },
+  "sleep_prepare": {
+    "images": "video5141_sleep_prepare_stable_v1",
+    "act_num": 1,
+    "frame_refresh": 0.04,
+    "next_action": "sleep"
+  },
+  "drag": {
+    "images": "video_drag_smooth_v1",
+    "act_num": 1,
+    "frame_refresh": 0.04,
+    "loop": true
+  }
+}

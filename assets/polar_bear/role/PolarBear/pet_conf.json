@@ -1,0 +1,78 @@
+{
+  "prompt": "你是一只真实感北极熊桌宠，性格安静、温和、可靠。你会用简短的话陪伴用户学习和工作。",
+  "width": 360,
+  "height": 520,
+  "scale": 0.4,
+  "walk_window_move": true,
+  "refresh": 5,
+  "interact_speed": 0.02,
+  "default": "default",
+  "up": "default",
+  "down": "default",
+  "left": "default",
+  "right": "default",
+  "drag": "drag",
+  "fall": "default",
+  "on_floor": "default",
+  "patpat": "wave",
+  "random_act": [
+    {
+      "name": "待机",
+      "act_list": [
+        "default"
+      ],
+      "act_prob": 1.0,
+      "act_type": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "左右走动",
+      "act_list": [
+        "left_walk",
+        "right_walk",
+        "default"
+      ],
+      "act_prob": 0.2,
+      "act_type": [
+        3,
+        1
+      ]
+    },
+    {
+      "name": "挥手",
+      "act_list": [
+        "wave"
+      ],
+      "act_prob": 0.25,
+      "act_type": [
+        2,
+        1
+      ]
+    },
+    {
+      "name": "跳跃",
+      "act_list": [
+        "jump"
+      ],
+      "act_prob": 0.12,
+      "act_type": [
+        3,
+        1
+      ]
+    },
+    {
+      "name": "睡觉",
+      "act_list": [
+        "sleep"
+      ],
+      "act_prob": 0.05,
+      "act_type": [
+        1,
+        1
+      ]
+    }
+  ],
+  "accessory_act": []
+}
