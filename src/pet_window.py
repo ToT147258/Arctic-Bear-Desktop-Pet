@@ -844,7 +844,7 @@ class PolarBearPetWindow(QWidget):
         painter.drawText(header_rect, Qt.AlignCenter, f"北极熊 · {self.mood} · {self.scale_percent}%")
 
         if self._bubble_text:
-            self._draw_bubble(painter, content_left)
+            self._draw_bubble(painter, content_left, header_rect)
 
     def _current_frame(self):
         action = self._current_action()
@@ -872,20 +872,52 @@ class PolarBearPetWindow(QWidget):
             "请放入真实动画帧：assets/polar_bear/real_actions",
         )
 
-    def _draw_bubble(self, painter, content_left):
+    def _draw_bubble(self, painter, content_left, header_rect):
         scale = self._scale
+        margin = max(6, round(12 * scale))
+        left_space = max(0, content_left)
+        right_space = max(0, self.width() - (content_left + self._content_width))
+        preferred_width = max(150, round(240 * scale))
+        side_space = max(left_space, right_space)
+        bubble_width = min(preferred_width, max(0, side_space - margin * 2))
+
+        if bubble_width >= max(120, round(150 * scale)):
+            if left_space >= right_space:
+                bubble_x = max(margin, content_left - margin - bubble_width)
+            else:
+                bubble_x = min(
+                    self.width() - bubble_width - margin,
+                    content_left + self._content_width + margin,
+                )
+        else:
+            bubble_width = max(120, self._content_width - round(48 * scale))
+            bubble_x = content_left + (self._content_width - bubble_width) / 2
+
+        text_margin = max(8, round(10 * scale))
+        text_width = max(1, bubble_width - text_margin * 2)
+        measured = painter.boundingRect(
+            QRectF(0, 0, text_width, 1000),
+            Qt.AlignCenter | Qt.TextWordWrap,
+            self._bubble_text,
+        )
+        bubble_height = max(max(38, round(48 * scale)), math.ceil(measured.height()) + text_margin * 2)
+        bubble_height = min(bubble_height, max(76, round(96 * scale)))
+        top_y = header_rect.bottom() + max(8, round(12 * scale))
+        bottom_limit = self.height() - bubble_height - max(14, round(72 * scale))
+        bubble_y = max(max(4, round(8 * scale)), min(top_y, bottom_limit))
+
         bubble_rect = QRectF(
-            content_left + round(36 * scale),
-            round(48 * scale),
-            self._content_width - round(72 * scale),
-            max(34, round(42 * scale)),
+            bubble_x,
+            bubble_y,
+            bubble_width,
+            bubble_height,
         )
         painter.setPen(QPen(QColor(126, 232, 255), max(1, round(2 * scale))))
         painter.setBrush(QColor(12, 24, 38, 228))
         painter.drawRoundedRect(bubble_rect, max(8, round(12 * scale)), max(8, round(12 * scale)))
         painter.setPen(QColor(235, 250, 255))
         painter.drawText(
-            bubble_rect.adjusted(round(10 * scale), 0, -round(10 * scale), 0),
+            bubble_rect.adjusted(text_margin, 0, -text_margin, 0),
             Qt.AlignCenter | Qt.TextWordWrap,
             self._bubble_text,
         )
