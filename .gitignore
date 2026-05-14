@@ -6,6 +6,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.pycache_check/
 
 # Virtual environments and local dependency caches
 .venv/
@@ -16,6 +17,7 @@ env/
 # Local diagnostics and generated scratch output
 diagnostics/
 tmp_video_samples/
+data/save.json
 tools/__pycache__/
 tools/_*.png
 tools/_*.jpg

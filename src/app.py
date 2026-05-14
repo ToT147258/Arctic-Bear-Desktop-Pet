@@ -16,6 +16,7 @@ from src.modules.interaction import InteractionPage
 from src.modules.notification import NotificationPage
 from src.modules.settings import SettingsPage
 from src.modules.status import StatusPage
+from src.pet_data import PetDataStore
 from src.pet_window import PolarBearPetWindow
 
 
@@ -26,9 +27,15 @@ class PolarBearPetApp(QMainWindow):
         super().__init__()
         self.setWindowTitle("北极熊桌面宠物系统")
         self.resize(1180, 760)
+        self.store = PetDataStore()
         self.pet_window = PolarBearPetWindow()
+        self.pet_window.setWindowOpacity(float(self.store.settings.get("opacity", 1.0)))
+        self.pet_window.set_always_on_top(bool(self.store.settings.get("always_on_top", True)))
         self.nav_buttons = []
+        self.metric_value_labels = {}
         self._build_ui()
+        self.store.changed.connect(self._refresh_overview)
+        self._refresh_overview()
 
     def _build_ui(self):
         root = QWidget()
@@ -40,11 +47,11 @@ class PolarBearPetApp(QMainWindow):
         self.stack = QStackedWidget()
         pages = [
             ("总览工作台", self._build_overview_page()),
-            ("桌宠交互", InteractionPage()),
-            ("状态成长", StatusPage()),
-            ("背包喂养", BackpackPage()),
-            ("系统设置", SettingsPage()),
-            ("通知日志", NotificationPage()),
+            ("桌宠交互", InteractionPage(self.pet_window, self.store, self._play_pet_action, self.toggle_pet_window)),
+            ("状态成长", StatusPage(self.store, self._play_pet_action)),
+            ("背包喂养", BackpackPage(self.store, self._play_pet_action)),
+            ("系统设置", SettingsPage(self.store, self.pet_window)),
+            ("通知日志", NotificationPage(self.store, self.pet_window)),
         ]
 
         for index, (name, page) in enumerate(pages):
@@ -104,7 +111,7 @@ class PolarBearPetApp(QMainWindow):
         eyebrow.setObjectName("eyebrow")
         title = QLabel("北极熊桌宠控制台")
         title.setObjectName("heroTitle")
-        desc = QLabel("当前已经完成桌面应用骨架、悬浮桌宠窗口、五大模块页面和中期 UML 设计说明。后续将继续接入动作系统、状态联动和大模型智能陪伴。")
+        desc = QLabel("当前已经接入真实北极熊序列帧、动作控制、状态成长、背包投喂、本地存档和通知日志。主控台中的操作会直接影响桌宠表现。")
         desc.setWordWrap(True)
         desc.setObjectName("heroDesc")
         hero_text.addWidget(eyebrow)
@@ -128,10 +135,10 @@ class PolarBearPetApp(QMainWindow):
         metrics = QGridLayout()
         metrics.setSpacing(14)
         metric_data = [
-            ("饱食度", "86%", "投喂模块后续联动"),
-            ("心情值", "92%", "互动反馈已规划"),
-            ("好感度", "68%", "成长系统待实现"),
-            ("任务进度", "3 / 5", "中期任务原型"),
+            ("hunger", "饱食度", "0%", "投喂食物可恢复"),
+            ("mood", "心情值", "0%", "互动和玩具会提升"),
+            ("affection", "好感度", "0%", "陪伴与礼物会提升"),
+            ("tasks", "任务进度", "0 / 0", "每日任务与奖励"),
         ]
         for index, item in enumerate(metric_data):
             metrics.addWidget(self._metric_card(*item), index // 4, index % 4)
@@ -140,28 +147,28 @@ class PolarBearPetApp(QMainWindow):
         content = QHBoxLayout()
         content.setSpacing(16)
         content.addWidget(self._info_panel("中期已完成", [
-            "新建 PySide6 桌面应用项目",
-            "完成控制台主窗口和悬浮桌宠窗口",
-            "接入半扁平北极熊 PNG 素材",
+            "完成 PySide6 控制台与悬浮桌宠",
+            "接入真实北极熊 PNG 序列帧动作",
+            "完成缩放、拖拽、右键菜单和动作过渡",
             "整理五大模块文档和 UML 图讲解",
         ]), 1)
-        content.addWidget(self._info_panel("后续开发重点", [
-            "补充北极熊动作素材和动作播放",
-            "实现状态、背包、任务的数据联动",
-            "加入本地存档和系统托盘",
-            "接入大模型聊天与学习陪伴",
+        content.addWidget(self._info_panel("当前功能重点", [
+            "状态、背包、任务和日志已联动",
+            "设置页可控制缩放、透明度和置顶",
+            "投喂、互动、睡觉会影响状态",
+            "数据会保存到本地 JSON 存档",
         ]), 1)
         content.addWidget(self._info_panel("最近事件", [
             "桌宠窗口已启动",
-            "呼吸动画运行中",
-            "模块文档已更新",
-            "等待接入更多功能逻辑",
+            "待机眨眼微动持续运行",
+            "动作按钮可直接触发桌宠",
+            "通知页可查看操作日志",
         ]), 1)
         layout.addLayout(content)
         layout.addStretch()
         return page
 
-    def _metric_card(self, name, value, note):
+    def _metric_card(self, key, name, value, note):
         card = QFrame()
         card.setObjectName("metricCard")
         layout = QVBoxLayout(card)
@@ -169,6 +176,7 @@ class PolarBearPetApp(QMainWindow):
         title.setObjectName("metricName")
         number = QLabel(value)
         number.setObjectName("metricValue")
+        self.metric_value_labels[key] = number
         desc = QLabel(note)
         desc.setObjectName("metricNote")
         desc.setWordWrap(True)
@@ -200,11 +208,29 @@ class PolarBearPetApp(QMainWindow):
             button.style().polish(button)
 
     def _trigger_pet_interaction(self):
+        self.store.touch()
+        self._play_pet_action("touch", "触发互动，心情和好感都提升了。")
+
+    def _play_pet_action(self, action_name, bubble=None):
         if not self.pet_window.isVisible():
             self.pet_window.show()
-            self.pet_window.raise_()
-        self.pet_window.play_action("wave")
+        self.pet_window.raise_()
+        self.pet_window.play_action(action_name)
+        if bubble:
+            self.pet_window.show_bubble(bubble)
         self.pet_window.update()
+
+    def _refresh_overview(self):
+        stats = self.store.stats
+        for key in ("hunger", "mood", "affection"):
+            label = self.metric_value_labels.get(key)
+            if label:
+                label.setText(f"{stats.get(key, 0)}%")
+        task_label = self.metric_value_labels.get("tasks")
+        if task_label:
+            done = sum(1 for value in self.store.tasks.values() if value)
+            total = len(self.store.tasks)
+            task_label.setText(f"{done} / {total}")
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -213,6 +239,7 @@ class PolarBearPetApp(QMainWindow):
             self.pet_window.show()
 
     def closeEvent(self, event):
+        self.store.save()
         self.pet_window.close()
         super().closeEvent(event)
 

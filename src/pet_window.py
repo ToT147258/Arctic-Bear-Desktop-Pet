@@ -90,6 +90,7 @@ class PolarBearPetWindow(QWidget):
         self._screen_area_cache = None
         self._next_random_action = self._random_idle_delay()
         self._idle_events_until_sleep = random.randint(2, 4)
+        self._bubble_text = ""
 
         self._fallback_source_pixmap = QPixmap(str(self.asset_root / "polar-bear-realistic.png"))
         self.fallback_pixmap = self._scale_pixmap(self._fallback_source_pixmap)
@@ -151,6 +152,26 @@ class PolarBearPetWindow(QWidget):
             elif name == "walk_right":
                 action.move_x = float(action.base_move_x or 2.0) if self._walk_window_move else 0.0
         self._save_walk_window_move()
+
+    def set_always_on_top(self, enabled):
+        visible = self.isVisible()
+        flags = Qt.FramelessWindowHint | Qt.Tool
+        if enabled:
+            flags |= Qt.WindowStaysOnTopHint
+        self.setWindowFlags(flags)
+        if visible:
+            self.show()
+            self.raise_()
+
+    def show_bubble(self, text, duration=2400):
+        self._bubble_text = str(text)
+        self.update()
+        QTimer.singleShot(duration, self._clear_bubble)
+
+    def _clear_bubble(self):
+        if self._bubble_text:
+            self._bubble_text = ""
+            self.update()
 
     def _clamp_scale(self, value):
         try:
@@ -781,6 +802,9 @@ class PolarBearPetWindow(QWidget):
         painter.setPen(QColor(222, 248, 255))
         painter.drawText(header_rect, Qt.AlignCenter, f"北极熊 · {self.mood} · {self.scale_percent}%")
 
+        if self._bubble_text:
+            self._draw_bubble(painter, content_left)
+
     def _current_frame(self):
         action = self._current_action()
         if not action or not action.frames:
@@ -805,4 +829,22 @@ class PolarBearPetWindow(QWidget):
             QRectF(content_left + round(54 * self._scale), self.height() - 72 * self._scale, self._content_width - round(108 * self._scale), 30 * self._scale),
             Qt.AlignCenter | Qt.TextWordWrap,
             "请放入真实动画帧：assets/polar_bear/real_actions",
+        )
+
+    def _draw_bubble(self, painter, content_left):
+        scale = self._scale
+        bubble_rect = QRectF(
+            content_left + round(36 * scale),
+            round(48 * scale),
+            self._content_width - round(72 * scale),
+            max(34, round(42 * scale)),
+        )
+        painter.setPen(QPen(QColor(126, 232, 255), max(1, round(2 * scale))))
+        painter.setBrush(QColor(12, 24, 38, 228))
+        painter.drawRoundedRect(bubble_rect, max(8, round(12 * scale)), max(8, round(12 * scale)))
+        painter.setPen(QColor(235, 250, 255))
+        painter.drawText(
+            bubble_rect.adjusted(round(10 * scale), 0, -round(10 * scale), 0),
+            Qt.AlignCenter | Qt.TextWordWrap,
+            self._bubble_text,
         )
