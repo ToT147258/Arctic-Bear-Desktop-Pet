@@ -11,8 +11,10 @@ class SettingsPage(QWidget):
         self.pet_window = pet_window
         self.scale_value = None
         self.opacity_value = None
+        self.edge_threshold_value = None
         self.scale_slider = None
         self.opacity_slider = None
+        self.edge_threshold_slider = None
         self._build_ui()
         self.store.changed.connect(self.refresh)
         self.refresh()
@@ -80,11 +82,46 @@ class SettingsPage(QWidget):
         top.toggled.connect(self._toggle_topmost)
         layout.addWidget(top)
 
+        bubble = QCheckBox("启用桌宠气泡提示")
+        bubble.setObjectName("checkBox")
+        bubble.setChecked(bool(self.store.settings.get("bubble_on", True)))
+        bubble.toggled.connect(self._toggle_bubble)
+        layout.addWidget(bubble)
+
+        decay = QCheckBox("状态随时间自然变化")
+        decay.setObjectName("checkBox")
+        decay.setChecked(bool(self.store.settings.get("status_decay", True)))
+        decay.toggled.connect(self._toggle_decay)
+        layout.addWidget(decay)
+
+        auto_feed = QCheckBox("饱食度过低时自动投喂")
+        auto_feed.setObjectName("checkBox")
+        auto_feed.setChecked(bool(self.store.settings.get("auto_feed", True)))
+        auto_feed.toggled.connect(self._toggle_auto_feed)
+        layout.addWidget(auto_feed)
+
         walk = QCheckBox("走路时移动窗口")
         walk.setObjectName("checkBox")
         walk.setChecked(bool(getattr(self.pet_window, "_walk_window_move", True)))
         walk.toggled.connect(self._toggle_walk_move)
         layout.addWidget(walk)
+
+        edge = QCheckBox("拖拽结束时贴边吸附")
+        edge.setObjectName("checkBox")
+        edge.setChecked(bool(self.store.settings.get("edge_snap_enabled", True)))
+        edge.toggled.connect(self._toggle_edge_snap)
+        layout.addWidget(edge)
+
+        self.edge_threshold_value = QLabel()
+        self.edge_threshold_value.setObjectName("taskItem")
+        self.edge_threshold_slider = QSlider(Qt.Horizontal)
+        self.edge_threshold_slider.setRange(8, 96)
+        self.edge_threshold_slider.setSingleStep(4)
+        self.edge_threshold_slider.setValue(int(self.store.settings.get("edge_snap_threshold", 48)))
+        self.edge_threshold_slider.valueChanged.connect(self._preview_edge_threshold)
+        self.edge_threshold_slider.sliderReleased.connect(self._save_edge_threshold)
+        layout.addWidget(self.edge_threshold_value)
+        layout.addWidget(self.edge_threshold_slider)
         return card
 
     def _save_card(self):
@@ -117,6 +154,8 @@ class SettingsPage(QWidget):
         self.scale_value.setText(f"当前比例：{self.pet_window.scale_percent}%")
         opacity = int(float(self.store.settings.get("opacity", 1.0)) * 100)
         self.opacity_value.setText(f"当前透明度：{opacity}%")
+        if self.edge_threshold_value:
+            self.edge_threshold_value.setText(f"贴边吸附距离：{self.store.settings.get('edge_snap_threshold', 48)} px")
 
     def _preview_scale(self, value):
         self.scale_value.setText(f"当前比例：{value}%")
@@ -143,6 +182,28 @@ class SettingsPage(QWidget):
         self.pet_window.set_walk_window_move(bool(checked))
         self.store.add_log("设置", "走路窗口移动已开启。" if checked else "走路窗口移动已关闭。")
 
+    def _toggle_bubble(self, checked):
+        self.store.set_setting("bubble_on", bool(checked))
+
+    def _toggle_decay(self, checked):
+        self.store.set_setting("status_decay", bool(checked))
+
+    def _toggle_auto_feed(self, checked):
+        self.store.set_setting("auto_feed", bool(checked))
+
+    def _toggle_edge_snap(self, checked):
+        self.pet_window.set_edge_snap(bool(checked), self.edge_threshold_slider.value())
+        self.store.set_setting("edge_snap_enabled", bool(checked))
+
+    def _preview_edge_threshold(self, value):
+        self.edge_threshold_value.setText(f"贴边吸附距离：{value} px")
+        self.pet_window.set_edge_snap(bool(self.store.settings.get("edge_snap_enabled", True)), value)
+
+    def _save_edge_threshold(self):
+        value = int(self.edge_threshold_slider.value())
+        self.pet_window.set_edge_snap(bool(self.store.settings.get("edge_snap_enabled", True)), value)
+        self.store.set_setting("edge_snap_threshold", value)
+
     def _save_settings(self):
         self.store.save()
         self.store.add_log("设置", "当前设置已保存。")
@@ -160,8 +221,10 @@ class SettingsPage(QWidget):
         self.pet_window.set_pet_scale(0.5)
         self.pet_window.setWindowOpacity(1.0)
         self.pet_window.set_always_on_top(True)
+        self.pet_window.set_edge_snap(True, 48)
         self.scale_slider.setValue(50)
         self.opacity_slider.setValue(100)
+        self.edge_threshold_slider.setValue(48)
 
 
 PAGE_STYLE = """

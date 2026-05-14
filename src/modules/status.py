@@ -1,3 +1,5 @@
+import time
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget
 
@@ -20,6 +22,8 @@ class StatusPage(QWidget):
         self.progress_bars = {}
         self.task_buttons = {}
         self.level_label = None
+        self.companion_bar = None
+        self.buff_label = None
         self._build_ui()
         self.store.changed.connect(self.refresh)
         self.refresh()
@@ -40,6 +44,19 @@ class StatusPage(QWidget):
         self.level_label = QLabel()
         self.level_label.setObjectName("levelText")
         layout.addWidget(self.level_label)
+
+        companion_card = QFrame()
+        companion_card.setObjectName("moduleCard")
+        companion_layout = QVBoxLayout(companion_card)
+        companion_title = QLabel("今日陪伴进度")
+        companion_title.setObjectName("cardTitle")
+        self.companion_bar = QProgressBar()
+        self.companion_bar.setRange(0, 100)
+        self.companion_bar.setTextVisible(True)
+        self.companion_bar.setObjectName("statBar")
+        companion_layout.addWidget(companion_title)
+        companion_layout.addWidget(self.companion_bar)
+        layout.addWidget(companion_card)
 
         stat_grid = QGridLayout()
         stat_grid.setSpacing(12)
@@ -62,6 +79,11 @@ class StatusPage(QWidget):
             button.clicked.connect(callback)
             actions.addWidget(button, 0, index)
         layout.addLayout(actions)
+
+        self.buff_label = QLabel()
+        self.buff_label.setWordWrap(True)
+        self.buff_label.setObjectName("buffText")
+        layout.addWidget(self.buff_label)
 
         section = QLabel("每日任务")
         section.setObjectName("sectionTitle")
@@ -115,12 +137,27 @@ class StatusPage(QWidget):
             bar.setValue(value)
             bar.setFormat(f"{value}%")
         self.level_label.setText(
-            f"Lv.{stats.get('level', 1)}  经验 {stats.get('exp', 0)}/100  金币 {stats.get('coins', 0)}"
+            f"Lv.{stats.get('level', 1)}  经验 {stats.get('exp', 0)}/100  金币 {stats.get('coins', 0)}  陪伴 {self.store.data.get('days', 1)} 天"
         )
+        seconds, goal = self.store.companion_progress()
+        percent = min(100, int(seconds / goal * 100))
+        self.companion_bar.setValue(percent)
+        self.companion_bar.setFormat(f"{seconds // 60}/{max(1, goal // 60)} 分钟")
+        self._refresh_buffs()
         for task_id, button in self.task_buttons.items():
             done = bool(self.store.tasks.get(task_id))
             button.setEnabled(not done)
             button.setText("已完成" if done else "完成任务")
+
+    def _refresh_buffs(self):
+        buffs = []
+        for buff in self.store.active_buffs.values():
+            remaining = max(0, int(buff.get("expires_at", 0)) - int(time.time()))
+            buffs.append(f"{buff.get('name')}：{remaining // 60}分{remaining % 60}秒")
+        if buffs:
+            self.buff_label.setText("当前增益：" + "；".join(buffs))
+        else:
+            self.buff_label.setText("当前增益：暂无")
 
     def _complete_companion(self):
         self.store.complete_task("companion")
@@ -140,7 +177,7 @@ PAGE_STYLE = """
     font-size: 30px;
     font-weight: 800;
 }
-#pageDescription, #taskItem {
+#pageDescription, #taskItem, #buffText {
     color: #b8cbda;
     font-size: 14px;
 }

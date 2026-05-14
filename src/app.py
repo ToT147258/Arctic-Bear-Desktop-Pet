@@ -1,12 +1,18 @@
-from PySide6.QtCore import Qt
+from pathlib import Path
+
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QMainWindow,
     QPushButton,
     QStackedWidget,
+    QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
 )
@@ -31,10 +37,22 @@ class PolarBearPetApp(QMainWindow):
         self.pet_window = PolarBearPetWindow()
         self.pet_window.setWindowOpacity(float(self.store.settings.get("opacity", 1.0)))
         self.pet_window.set_always_on_top(bool(self.store.settings.get("always_on_top", True)))
+        self.pet_window.set_edge_snap(
+            bool(self.store.settings.get("edge_snap_enabled", True)),
+            int(self.store.settings.get("edge_snap_threshold", 48)),
+        )
+        self.pet_window.interaction_requested.connect(self._handle_pet_window_interaction)
         self.nav_buttons = []
         self.metric_value_labels = {}
+        self.tray_icon = None
         self._build_ui()
+        self._build_tray()
+        self._life_timer = QTimer(self)
+        self._life_timer.setTimerType(Qt.PreciseTimer)
+        self._life_timer.timeout.connect(self._tick_pet_life)
+        self._life_timer.start(60000)
         self.store.changed.connect(self._refresh_overview)
+        self._show_tick_messages(self.store.tick())
         self._refresh_overview()
 
     def _build_ui(self):
@@ -216,9 +234,85 @@ class PolarBearPetApp(QMainWindow):
             self.pet_window.show()
         self.pet_window.raise_()
         self.pet_window.play_action(action_name)
-        if bubble:
+        if bubble and self.store.settings.get("bubble_on", True):
             self.pet_window.show_bubble(bubble)
         self.pet_window.update()
+
+    def _handle_pet_window_interaction(self, action_name):
+        if action_name == "touch":
+            self.store.touch()
+            self._show_bubble("摸摸头，心情变好了。")
+        elif action_name == "wave":
+            self.store.add_log("互动", "桌宠挥了挥手。")
+            self._show_bubble("我在这里。")
+        elif action_name in {"walk_left", "walk_right"}:
+            self.store.walk()
+            self._show_bubble("散步一小段。")
+        elif action_name == "sleep":
+            self.store.rest()
+            self._show_bubble("准备休息一下。")
+        elif action_name == "jump":
+            self.store.adjust_stats({"mood": 4, "energy": -2})
+            self.store.add_log("互动", "触发了跳跃动作。")
+        elif action_name == "drag":
+            self.store.add_log("互动", "开始拖拽桌宠。")
+        elif action_name == "drag_end":
+            self.store.add_log("互动", "拖拽结束，位置已更新。")
+
+    def _show_bubble(self, message):
+        if message and self.store.settings.get("bubble_on", True):
+            self.pet_window.show_bubble(message)
+
+    def _tick_pet_life(self):
+        self._show_tick_messages(self.store.tick())
+
+    def _show_tick_messages(self, messages):
+        for message in messages[:1]:
+            self._show_bubble(message)
+
+    def _build_tray(self):
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        icon_path = Path(__file__).resolve().parents[1] / "assets" / "polar_bear" / "polar-bear-realistic.png"
+        self.tray_icon = QSystemTrayIcon(QIcon(str(icon_path)), self)
+        self.tray_icon.setToolTip("北极熊桌面宠物")
+
+        menu = QMenu()
+        show_console = QAction("显示控制台", self)
+        show_console.triggered.connect(self._show_console)
+        toggle_pet = QAction("显示 / 隐藏桌宠", self)
+        toggle_pet.triggered.connect(self.toggle_pet_window)
+        feed = QAction("投喂小鱼", self)
+        feed.triggered.connect(lambda: self._feed_from_tray("fish"))
+        rest = QAction("休息一下", self)
+        rest.triggered.connect(self._rest_from_tray)
+        quit_action = QAction("退出", self)
+        quit_action.triggered.connect(QApplication.instance().quit)
+
+        for action in (show_console, toggle_pet, feed, rest):
+            menu.addAction(action)
+        menu.addSeparator()
+        menu.addAction(quit_action)
+        self.tray_icon.setContextMenu(menu)
+        self.tray_icon.activated.connect(self._handle_tray_activated)
+        self.tray_icon.show()
+
+    def _show_console(self):
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def _handle_tray_activated(self, reason):
+        if reason == QSystemTrayIcon.Trigger:
+            self._show_console()
+
+    def _feed_from_tray(self, item_id):
+        ok, message = self.store.feed(item_id)
+        self._play_pet_action("touch" if ok else "idle", message)
+
+    def _rest_from_tray(self):
+        self.store.rest()
+        self._play_pet_action("sleep", "进入休息状态。")
 
     def _refresh_overview(self):
         stats = self.store.stats

@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QElapsedTimer, QTimer
+from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QElapsedTimer, QTimer, Signal
 from PySide6.QtGui import QColor, QImageReader, QPainter, QPen, QPixmap, QTransform
 from PySide6.QtWidgets import QApplication, QMenu, QWidget
 
@@ -51,6 +51,8 @@ class PolarBearPetWindow(QWidget):
     不再用单张图片位移、旋转、缩放来伪装动画。
     """
 
+    interaction_requested = Signal(str)
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("北极熊桌宠")
@@ -91,6 +93,8 @@ class PolarBearPetWindow(QWidget):
         self._next_random_action = self._random_idle_delay()
         self._idle_events_until_sleep = random.randint(2, 4)
         self._bubble_text = ""
+        self._edge_snap_enabled = True
+        self._edge_snap_threshold = 48
 
         self._fallback_source_pixmap = QPixmap(str(self.asset_root / "polar-bear-realistic.png"))
         self.fallback_pixmap = self._scale_pixmap(self._fallback_source_pixmap)
@@ -162,6 +166,11 @@ class PolarBearPetWindow(QWidget):
         if visible:
             self.show()
             self.raise_()
+
+    def set_edge_snap(self, enabled, threshold=None):
+        self._edge_snap_enabled = bool(enabled)
+        if threshold is not None:
+            self._edge_snap_threshold = max(8, int(threshold))
 
     def show_bubble(self, text, duration=2400):
         self._bubble_text = str(text)
@@ -678,6 +687,29 @@ class PolarBearPetWindow(QWidget):
         self.update()
         return True
 
+    def _snap_to_screen_edge(self):
+        if not self._edge_snap_enabled:
+            return
+        area = self._available_screen_area()
+        if not area:
+            return
+        threshold = max(8, int(self._edge_snap_threshold))
+        next_x = self.x()
+        next_y = self.y()
+
+        if abs(self.x() - area.left()) <= threshold:
+            next_x = area.left()
+        elif abs((area.right() - self.width()) - self.x()) <= threshold:
+            next_x = area.right() - self.width()
+
+        if abs(self.y() - area.top()) <= threshold:
+            next_y = area.top()
+        elif abs((area.bottom() - self.height()) - self.y()) <= threshold:
+            next_y = area.bottom() - self.height()
+
+        if next_x != self.x() or next_y != self.y():
+            self.move(next_x, next_y)
+
     def _move_within_screen(self, dx, dy, turn_on_edge=True):
         area = self._available_screen_area()
         if not area:
@@ -712,6 +744,7 @@ class PolarBearPetWindow(QWidget):
                 self._is_dragging = True
                 self._click_action_token += 1
                 self.play_action("drag")
+                self.interaction_requested.emit("drag")
             self.move(current_position - self._drag_position)
             event.accept()
 
@@ -720,7 +753,9 @@ class PolarBearPetWindow(QWidget):
             if self._is_dragging:
                 self._is_dragging = False
                 self._click_action_token += 1
+                self._snap_to_screen_edge()
                 self.play_action("idle")
+                self.interaction_requested.emit("drag_end")
             elif self._ignore_next_click_release:
                 self._ignore_next_click_release = False
                 self._click_action_token += 1
@@ -732,6 +767,7 @@ class PolarBearPetWindow(QWidget):
         self._click_action_token += 1
         self._ignore_next_click_release = True
         self.play_action("wave")
+        self.interaction_requested.emit("wave")
         event.accept()
 
     def _schedule_click_action(self):
@@ -746,6 +782,7 @@ class PolarBearPetWindow(QWidget):
         if token != self._click_action_token or self._is_dragging:
             return
         self.play_action("touch" if "touch" in self._actions else "wave", transition=False)
+        self.interaction_requested.emit("touch" if "touch" in self._actions else "wave")
 
     def wheelEvent(self, event):
         if event.modifiers() & Qt.ControlModifier:
@@ -773,8 +810,12 @@ class PolarBearPetWindow(QWidget):
             if action_name not in self._actions:
                 continue
             action = menu.addAction(ACTION_LABELS.get(action_name, action_name))
-            action.triggered.connect(lambda checked=False, name=action_name: self.play_action(name))
+            action.triggered.connect(lambda checked=False, name=action_name: self._play_menu_action(name))
         menu.exec(event.globalPos())
+
+    def _play_menu_action(self, action_name):
+        self.play_action(action_name)
+        self.interaction_requested.emit(action_name)
 
     def paintEvent(self, event):
         painter = QPainter(self)

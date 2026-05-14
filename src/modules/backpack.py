@@ -57,6 +57,9 @@ class BackpackPage(QWidget):
         effects = QLabel(self._format_effects(item["effects"]))
         effects.setWordWrap(True)
         effects.setObjectName("taskItem")
+        buff = QLabel(self._format_buff(item))
+        buff.setWordWrap(True)
+        buff.setObjectName("taskItem")
 
         use_button = QPushButton("投喂" if item["type"] == "food" else "使用")
         use_button.setCursor(Qt.PointingHandCursor)
@@ -72,6 +75,7 @@ class BackpackPage(QWidget):
         layout.addWidget(count)
         layout.addWidget(desc)
         layout.addWidget(effects)
+        layout.addWidget(buff)
         layout.addWidget(use_button)
         layout.addWidget(buy_button)
         return card
@@ -88,6 +92,12 @@ class BackpackPage(QWidget):
             sign = "+" if value >= 0 else ""
             parts.append(f"{names.get(key, key)} {sign}{value}")
         return "效果：" + " / ".join(parts)
+
+    def _format_buff(self, item):
+        buff = item.get("buff")
+        if not buff:
+            return "增益：无"
+        return "增益：" + buff.get("description", "特殊效果")
 
     def refresh(self):
         self.coin_label.setText(f"当前金币：{self.store.stats.get('coins', 0)}")

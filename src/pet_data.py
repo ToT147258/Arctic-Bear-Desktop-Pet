@@ -19,6 +19,11 @@ ITEM_CATALOG = {
         "type": "food",
         "price": 24,
         "effects": {"hunger": 10, "energy": 8},
+        "buff": {
+            "effect": "hunger_stop",
+            "expiration": 300,
+            "description": "5 分钟内饱食度不会自然下降。",
+        },
         "description": "温和恢复体力，适合睡醒后补充。",
     },
     "berry_cake": {
@@ -26,6 +31,11 @@ ITEM_CATALOG = {
         "type": "food",
         "price": 42,
         "effects": {"hunger": 12, "mood": 12, "affection": 3},
+        "buff": {
+            "effect": "mood_guard",
+            "expiration": 240,
+            "description": "4 分钟内心情不会自然下降。",
+        },
         "description": "小奖励食物，提升心情和好感。",
     },
     "snowball": {
@@ -33,6 +43,13 @@ ITEM_CATALOG = {
         "type": "toy",
         "price": 36,
         "effects": {"mood": 16, "affection": 2, "energy": -3},
+        "buff": {
+            "effect": "coin",
+            "interval": 30,
+            "value": 5,
+            "expiration": 120,
+            "description": "2 分钟内每 30 秒获得 5 金币。",
+        },
         "description": "互动玩具，适合触发玩耍动作。",
     },
     "scarf": {
@@ -84,7 +101,19 @@ DEFAULT_DATA = {
     "settings": {
         "opacity": 1.0,
         "always_on_top": True,
+        "auto_feed": True,
+        "bubble_on": True,
+        "status_decay": True,
+        "edge_snap_enabled": True,
+        "edge_snap_threshold": 48,
+        "companion_goal_minutes": 10,
     },
+    "active_buffs": {},
+    "today": "",
+    "days": 0,
+    "streak": 0,
+    "companion_seconds": 0,
+    "last_tick": 0,
     "logs": [],
 }
 
@@ -99,6 +128,7 @@ class PetDataStore(QObject):
         self.save_path = Path(save_path) if save_path else root / "data" / "save.json"
         self.data = deepcopy(DEFAULT_DATA)
         self.load()
+        self._rollover_today()
         if not self.data["tasks"].get("daily_login"):
             self.complete_task("daily_login", silent=True)
             self.add_log("系统", "欢迎回来，今日登录任务已完成。")
@@ -122,6 +152,10 @@ class PetDataStore(QObject):
     @property
     def logs(self):
         return self.data["logs"]
+
+    @property
+    def active_buffs(self):
+        return self.data["active_buffs"]
 
     def load(self):
         if not self.save_path.exists():
@@ -161,7 +195,34 @@ class PetDataStore(QObject):
             self.data["tasks"].setdefault(key, False)
         for key, value in DEFAULT_DATA["settings"].items():
             self.data["settings"].setdefault(key, value)
+        self.data.setdefault("active_buffs", {})
+        self.data.setdefault("today", "")
+        self.data.setdefault("days", 0)
+        self.data.setdefault("streak", 0)
+        self.data.setdefault("companion_seconds", 0)
+        self.data.setdefault("last_tick", 0)
         self.data.setdefault("logs", [])
+
+    def _today(self):
+        return datetime.now().strftime("%Y-%m-%d")
+
+    def _rollover_today(self):
+        today = self._today()
+        if self.data.get("today") == today:
+            return
+        old_today = self.data.get("today")
+        self.data["today"] = today
+        self.data["companion_seconds"] = 0
+        for key in TASK_CATALOG:
+            self.data["tasks"][key] = False
+        if old_today:
+            self.data["days"] = int(self.data.get("days", 0)) + 1
+            self.data["streak"] = int(self.data.get("streak", 0)) + 1
+        else:
+            self.data["days"] = max(1, int(self.data.get("days", 0) or 1))
+            self.data["streak"] = max(1, int(self.data.get("streak", 0) or 1))
+        self.data["last_tick"] = int(datetime.now().timestamp())
+        self.save()
 
     def _commit(self):
         self.save()
@@ -188,6 +249,56 @@ class PetDataStore(QObject):
             if key in {"hunger", "mood", "energy", "affection"}:
                 self.stats[key] = self._clamp_percent(self.stats.get(key, 0) + delta)
 
+    def _has_buff(self, effect_name):
+        now_ts = int(datetime.now().timestamp())
+        for buff in self.active_buffs.values():
+            if buff.get("effect") == effect_name and int(buff.get("expires_at", 0)) > now_ts:
+                return True
+        return False
+
+    def _activate_buff(self, item_id):
+        item = ITEM_CATALOG.get(item_id, {})
+        buff = item.get("buff")
+        if not buff:
+            return
+        now_ts = int(datetime.now().timestamp())
+        expiration = int(buff.get("expiration", 0))
+        if expiration <= 0:
+            return
+        self.active_buffs[item_id] = {
+            "name": item.get("name", item_id),
+            "effect": buff.get("effect", ""),
+            "value": int(buff.get("value", 0)),
+            "interval": int(buff.get("interval", 0)),
+            "expires_at": now_ts + expiration,
+            "next_tick_at": now_ts + int(buff.get("interval", expiration)),
+            "description": buff.get("description", ""),
+        }
+        self.add_log("增益", f"{item.get('name', item_id)}效果已生效：{buff.get('description', '')}")
+
+    def _tick_buffs(self, now_ts):
+        messages = []
+        for item_id, buff in list(self.active_buffs.items()):
+            expires_at = int(buff.get("expires_at", 0))
+            if expires_at <= now_ts:
+                self.active_buffs.pop(item_id, None)
+                messages.append(f"{buff.get('name', item_id)}的增益已结束。")
+                continue
+
+            effect = buff.get("effect")
+            interval = int(buff.get("interval", 0))
+            if effect == "coin" and interval > 0:
+                next_tick_at = int(buff.get("next_tick_at", now_ts + interval))
+                gained = 0
+                while next_tick_at <= now_ts and next_tick_at <= expires_at:
+                    gained += int(buff.get("value", 0))
+                    next_tick_at += interval
+                if gained:
+                    self.stats["coins"] = int(self.stats.get("coins", 0)) + gained
+                    buff["next_tick_at"] = next_tick_at
+                    messages.append(f"{buff.get('name', item_id)}带来了 {gained} 金币。")
+        return messages
+
     def gain_exp(self, amount):
         self.stats["exp"] = int(self.stats.get("exp", 0)) + int(amount)
         while self.stats["exp"] >= 100:
@@ -204,6 +315,7 @@ class PetDataStore(QObject):
             return False, f"{item['name']}数量不足。"
         self.inventory[item_id] -= 1
         self.adjust_stats(item["effects"])
+        self._activate_buff(item_id)
         self.gain_exp(4)
         self.complete_task("feed_once", silent=True)
         self.add_log("投喂", f"投喂了{item['name']}，状态已更新。")
@@ -219,6 +331,7 @@ class PetDataStore(QObject):
             return False, f"{item['name']}数量不足。"
         self.inventory[item_id] -= 1
         self.adjust_stats(item["effects"])
+        self._activate_buff(item_id)
         self.gain_exp(5)
         self.add_log("背包", f"使用了{item['name']}。")
         return True, f"使用了{item['name']}。"
@@ -270,11 +383,84 @@ class PetDataStore(QObject):
 
     def set_setting(self, key, value):
         self.settings[key] = value
-        self.add_log("设置", f"{key} 已更新。")
+        labels = {
+            "opacity": "透明度",
+            "always_on_top": "置顶",
+            "auto_feed": "自动投喂",
+            "bubble_on": "气泡提示",
+            "status_decay": "状态自然变化",
+            "edge_snap_enabled": "贴边吸附",
+            "edge_snap_threshold": "贴边距离",
+        }
+        self.add_log("设置", f"{labels.get(key, key)}已更新。")
 
     def reset_all(self):
         self.data = deepcopy(DEFAULT_DATA)
+        self._rollover_today()
+        self.complete_task("daily_login", silent=True)
         self.add_log("系统", "已恢复默认存档。")
+
+    def tick(self):
+        self._rollover_today()
+        now_ts = int(datetime.now().timestamp())
+        last_tick = int(self.data.get("last_tick") or now_ts)
+        elapsed = max(0, min(now_ts - last_tick, 7200))
+        self.data["last_tick"] = now_ts
+        messages = []
+
+        if elapsed <= 0:
+            return messages
+
+        messages.extend(self._tick_buffs(now_ts))
+
+        if self.settings.get("status_decay", True):
+            effects = {}
+            hunger_drop = int(elapsed // 300)
+            energy_drop = int(elapsed // 600)
+            mood_drop = int(elapsed // 900)
+            if hunger_drop and not self._has_buff("hunger_stop"):
+                effects["hunger"] = -hunger_drop
+            if energy_drop:
+                effects["energy"] = -energy_drop
+            if mood_drop and not self._has_buff("mood_guard"):
+                effects["mood"] = -mood_drop
+            if effects:
+                self.adjust_stats(effects)
+
+        self.data["companion_seconds"] = int(self.data.get("companion_seconds", 0)) + elapsed
+        goal_seconds = int(self.settings.get("companion_goal_minutes", 10)) * 60
+        if self.data["companion_seconds"] >= goal_seconds:
+            if self.complete_task("companion", silent=True):
+                messages.append("陪伴任务完成，奖励已到账。")
+
+        if self.settings.get("auto_feed", True) and self.stats.get("hunger", 0) < 40:
+            auto_message = self._try_auto_feed()
+            if auto_message:
+                messages.append(auto_message)
+
+        if self.stats.get("hunger", 0) <= 25:
+            messages.append("我有点饿了，可以投喂一点食物。")
+        elif self.stats.get("energy", 0) <= 25:
+            messages.append("体力有些低，适合休息一会儿。")
+
+        self._commit()
+        for message in messages:
+            if "增益已结束" in message or "金币" in message or "任务完成" in message:
+                self.add_log("系统", message)
+        return messages
+
+    def _try_auto_feed(self):
+        for item_id in ("fish", "milk", "ice", "berry_cake"):
+            if self.inventory.get(item_id, 0) > 0:
+                ok, message = self.feed(item_id)
+                if ok:
+                    return f"自动投喂：{message}"
+        return None
+
+    def companion_progress(self):
+        goal_seconds = int(self.settings.get("companion_goal_minutes", 10)) * 60
+        seconds = int(self.data.get("companion_seconds", 0))
+        return seconds, max(1, goal_seconds)
 
     def export_to(self, path):
         export_path = Path(path)
