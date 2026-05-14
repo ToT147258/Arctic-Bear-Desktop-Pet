@@ -1,3 +1,4 @@
+import random
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
@@ -45,12 +46,20 @@ class PolarBearPetApp(QMainWindow):
         self.nav_buttons = []
         self.metric_value_labels = {}
         self.tray_icon = None
+        self._touch_burst_count = 0
+        self._touch_burst_timer = QTimer(self)
+        self._touch_burst_timer.setSingleShot(True)
+        self._touch_burst_timer.timeout.connect(self._reset_touch_burst)
         self._build_ui()
         self._build_tray()
         self._life_timer = QTimer(self)
         self._life_timer.setTimerType(Qt.PreciseTimer)
         self._life_timer.timeout.connect(self._tick_pet_life)
         self._life_timer.start(60000)
+        self._focus_timer = QTimer(self)
+        self._focus_timer.setTimerType(Qt.PreciseTimer)
+        self._focus_timer.timeout.connect(self._tick_focus_session)
+        self._focus_timer.start(1000)
         self.store.changed.connect(self._refresh_overview)
         self._show_tick_messages(self.store.tick())
         self._refresh_overview()
@@ -227,6 +236,7 @@ class PolarBearPetApp(QMainWindow):
 
     def _trigger_pet_interaction(self):
         self.store.touch()
+        self._register_touch_burst()
         self._play_pet_action("touch", "触发互动，心情和好感都提升了。")
 
     def _play_pet_action(self, action_name, bubble=None):
@@ -241,6 +251,7 @@ class PolarBearPetApp(QMainWindow):
     def _handle_pet_window_interaction(self, action_name):
         if action_name == "touch":
             self.store.touch()
+            self._register_touch_burst()
             self._show_bubble("摸摸头，心情变好了。")
         elif action_name == "wave":
             self.store.add_log("互动", "桌宠挥了挥手。")
@@ -259,12 +270,38 @@ class PolarBearPetApp(QMainWindow):
         elif action_name == "drag_end":
             self.store.add_log("互动", "拖拽结束，位置已更新。")
 
+    def _register_touch_burst(self):
+        self._touch_burst_count += 1
+        self._touch_burst_timer.start(2500)
+        threshold = int(self.store.settings.get("pat_multi_click_talk_threshold", 6))
+        if self._touch_burst_count < threshold:
+            return
+        self._touch_burst_count = 0
+        message = random.choice(
+            [
+                "我在，我在，别急。",
+                "今天的互动量达标了。",
+                "再摸就要收小鱼了。",
+                "收到，陪伴信号很强。",
+            ]
+        )
+        self.store.add_log("互动", "连续点击触发了亲近反馈。")
+        self._show_bubble(message)
+
+    def _reset_touch_burst(self):
+        self._touch_burst_count = 0
+
     def _show_bubble(self, message):
         if message and self.store.settings.get("bubble_on", True):
             self.pet_window.show_bubble(message)
 
     def _tick_pet_life(self):
         self._show_tick_messages(self.store.tick())
+
+    def _tick_focus_session(self):
+        message = self.store.tick_focus()
+        if message:
+            self._play_pet_action("wave", message)
 
     def _show_tick_messages(self, messages):
         for message in messages[:1]:
@@ -284,12 +321,16 @@ class PolarBearPetApp(QMainWindow):
         toggle_pet.triggered.connect(self.toggle_pet_window)
         feed = QAction("投喂小鱼", self)
         feed.triggered.connect(lambda: self._feed_from_tray("fish"))
+        focus = QAction("开始 25 分钟专注", self)
+        focus.triggered.connect(self._start_focus_from_tray)
+        cancel_focus = QAction("取消专注", self)
+        cancel_focus.triggered.connect(self._cancel_focus_from_tray)
         rest = QAction("休息一下", self)
         rest.triggered.connect(self._rest_from_tray)
         quit_action = QAction("退出", self)
         quit_action.triggered.connect(QApplication.instance().quit)
 
-        for action in (show_console, toggle_pet, feed, rest):
+        for action in (show_console, toggle_pet, feed, focus, cancel_focus, rest):
             menu.addAction(action)
         menu.addSeparator()
         menu.addAction(quit_action)
@@ -313,6 +354,14 @@ class PolarBearPetApp(QMainWindow):
     def _rest_from_tray(self):
         self.store.rest()
         self._play_pet_action("sleep", "进入休息状态。")
+
+    def _start_focus_from_tray(self):
+        self.store.start_focus(25, "托盘专注", "focus")
+        self._play_pet_action("idle", "专注计时已经开始。")
+
+    def _cancel_focus_from_tray(self):
+        self.store.cancel_focus()
+        self._play_pet_action("idle", "专注计时已取消。")
 
     def _refresh_overview(self):
         stats = self.store.stats

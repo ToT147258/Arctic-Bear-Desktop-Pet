@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QUrl, Qt
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QListWidget, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QListWidget, QProgressBar, QPushButton, QVBoxLayout, QWidget
 
 
 class NotificationPage(QWidget):
@@ -11,6 +11,9 @@ class NotificationPage(QWidget):
         self.store = store
         self.pet_window = pet_window
         self.log_list = None
+        self.focus_label = None
+        self.focus_bar = None
+        self.pause_button = None
         self._build_ui()
         self.store.changed.connect(self.refresh)
         self.refresh()
@@ -45,6 +48,40 @@ class NotificationPage(QWidget):
             action_grid.addWidget(button, 0, index)
         layout.addLayout(action_grid)
 
+        focus_card = QFrame()
+        focus_card.setObjectName("moduleCard")
+        focus_layout = QVBoxLayout(focus_card)
+        focus_heading = QLabel("专注 / 番茄钟")
+        focus_heading.setObjectName("cardTitle")
+        self.focus_label = QLabel()
+        self.focus_label.setObjectName("pageDescription")
+        self.focus_bar = QProgressBar()
+        self.focus_bar.setRange(0, 100)
+        self.focus_bar.setTextVisible(True)
+        self.focus_bar.setObjectName("focusBar")
+        focus_actions = QGridLayout()
+        focus_actions.setSpacing(10)
+        for index, (label, callback) in enumerate(
+            [
+                ("开始专注 25 分钟", lambda: self._start_focus(25, "专注时间", "focus")),
+                ("开始短休 5 分钟", lambda: self._start_focus(5, "短休息", "break")),
+                ("暂停 / 继续", self._toggle_focus_pause),
+                ("取消计时", self.store.cancel_focus),
+            ]
+        ):
+            button = QPushButton(label)
+            button.setCursor(Qt.PointingHandCursor)
+            button.setObjectName("moduleAction")
+            button.clicked.connect(callback)
+            if label == "暂停 / 继续":
+                self.pause_button = button
+            focus_actions.addWidget(button, 0, index)
+        focus_layout.addWidget(focus_heading)
+        focus_layout.addWidget(self.focus_label)
+        focus_layout.addWidget(self.focus_bar)
+        focus_layout.addLayout(focus_actions)
+        layout.addWidget(focus_card)
+
         log_card = QFrame()
         log_card.setObjectName("moduleCard")
         log_layout = QVBoxLayout(log_card)
@@ -62,14 +99,40 @@ class NotificationPage(QWidget):
         self.log_list.clear()
         for entry in self.store.logs[:30]:
             self.log_list.addItem(entry)
+        done, total, text = self.store.focus_progress()
+        if total:
+            percent = min(100, int(done / total * 100))
+            self.focus_bar.setValue(percent)
+            self.focus_bar.setFormat(f"{percent}%")
+        else:
+            self.focus_bar.setValue(0)
+            self.focus_bar.setFormat("0%")
+        self.focus_label.setText(text)
+        session = self.store.focus_session
+        self.pause_button.setText("继续计时" if session.get("paused") else "暂停计时")
 
     def _show_bubble(self):
         message = "今天也照顾得很好。"
-        self.pet_window.show_bubble(message)
+        if self.store.settings.get("bubble_on", True):
+            self.pet_window.show_bubble(message)
         self.store.add_log("通知", "显示了一条桌宠气泡提示。")
 
     def _write_log(self):
         self.store.add_log("调试", "手动写入了一条测试日志。")
+
+    def _start_focus(self, minutes, title, mode):
+        self.store.start_focus(minutes, title, mode)
+        if self.store.settings.get("bubble_on", True):
+            self.pet_window.show_bubble(f"{title}开始了。")
+
+    def _toggle_focus_pause(self):
+        if not self.store.focus_session.get("active"):
+            self.store.start_focus(25, "专注时间", "focus")
+            return
+        if self.store.focus_session.get("paused"):
+            self.store.resume_focus()
+        else:
+            self.store.pause_focus()
 
     def _open_docs(self):
         docs_path = Path(__file__).resolve().parents[2] / "docs" / "项目主题及创意.md"
@@ -116,6 +179,18 @@ PAGE_STYLE = """
     border: 1px solid #284961;
     border-radius: 8px;
     padding: 8px;
+}
+#focusBar {
+    min-height: 22px;
+    color: #ffffff;
+    background: #07111f;
+    border: 1px solid #284961;
+    border-radius: 8px;
+    text-align: center;
+}
+#focusBar::chunk {
+    background: #8df3c8;
+    border-radius: 7px;
 }
 QLabel {
     color: #d7e7f3;

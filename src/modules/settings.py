@@ -12,9 +12,11 @@ class SettingsPage(QWidget):
         self.scale_value = None
         self.opacity_value = None
         self.edge_threshold_value = None
+        self.click_threshold_value = None
         self.scale_slider = None
         self.opacity_slider = None
         self.edge_threshold_slider = None
+        self.click_threshold_slider = None
         self._build_ui()
         self.store.changed.connect(self.refresh)
         self.refresh()
@@ -122,6 +124,17 @@ class SettingsPage(QWidget):
         self.edge_threshold_slider.sliderReleased.connect(self._save_edge_threshold)
         layout.addWidget(self.edge_threshold_value)
         layout.addWidget(self.edge_threshold_slider)
+
+        self.click_threshold_value = QLabel()
+        self.click_threshold_value.setObjectName("taskItem")
+        self.click_threshold_slider = QSlider(Qt.Horizontal)
+        self.click_threshold_slider.setRange(3, 12)
+        self.click_threshold_slider.setSingleStep(1)
+        self.click_threshold_slider.setValue(int(self.store.settings.get("pat_multi_click_talk_threshold", 6)))
+        self.click_threshold_slider.valueChanged.connect(self._preview_click_threshold)
+        self.click_threshold_slider.sliderReleased.connect(self._save_click_threshold)
+        layout.addWidget(self.click_threshold_value)
+        layout.addWidget(self.click_threshold_slider)
         return card
 
     def _save_card(self):
@@ -156,6 +169,10 @@ class SettingsPage(QWidget):
         self.opacity_value.setText(f"当前透明度：{opacity}%")
         if self.edge_threshold_value:
             self.edge_threshold_value.setText(f"贴边吸附距离：{self.store.settings.get('edge_snap_threshold', 48)} px")
+        if self.click_threshold_value:
+            self.click_threshold_value.setText(
+                f"连续互动气泡阈值：{self.store.settings.get('pat_multi_click_talk_threshold', 6)} 次"
+            )
 
     def _preview_scale(self, value):
         self.scale_value.setText(f"当前比例：{value}%")
@@ -204,6 +221,12 @@ class SettingsPage(QWidget):
         self.pet_window.set_edge_snap(bool(self.store.settings.get("edge_snap_enabled", True)), value)
         self.store.set_setting("edge_snap_threshold", value)
 
+    def _preview_click_threshold(self, value):
+        self.click_threshold_value.setText(f"连续互动气泡阈值：{value} 次")
+
+    def _save_click_threshold(self):
+        self.store.set_setting("pat_multi_click_talk_threshold", int(self.click_threshold_slider.value()))
+
     def _save_settings(self):
         self.store.save()
         self.store.add_log("设置", "当前设置已保存。")
@@ -225,6 +248,7 @@ class SettingsPage(QWidget):
         self.scale_slider.setValue(50)
         self.opacity_slider.setValue(100)
         self.edge_threshold_slider.setValue(48)
+        self.click_threshold_slider.setValue(6)
 
 
 PAGE_STYLE = """

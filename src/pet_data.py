@@ -76,6 +76,7 @@ TASK_CATALOG = {
     "touch_once": {"title": "触发一次互动", "reward": 14, "exp": 10},
     "sleep_once": {"title": "安排一次休息", "reward": 20, "exp": 12},
     "walk_once": {"title": "让桌宠走动一次", "reward": 14, "exp": 8},
+    "focus_once": {"title": "完成一次专注", "reward": 24, "exp": 16},
 }
 
 
@@ -107,6 +108,7 @@ DEFAULT_DATA = {
         "edge_snap_enabled": True,
         "edge_snap_threshold": 48,
         "companion_goal_minutes": 10,
+        "pat_multi_click_talk_threshold": 6,
     },
     "active_buffs": {},
     "today": "",
@@ -114,6 +116,15 @@ DEFAULT_DATA = {
     "streak": 0,
     "companion_seconds": 0,
     "last_tick": 0,
+    "focus_session": {
+        "active": False,
+        "paused": False,
+        "mode": "focus",
+        "title": "",
+        "total_seconds": 0,
+        "remaining_seconds": 0,
+        "ends_at": 0,
+    },
     "logs": [],
 }
 
@@ -156,6 +167,10 @@ class PetDataStore(QObject):
     @property
     def active_buffs(self):
         return self.data["active_buffs"]
+
+    @property
+    def focus_session(self):
+        return self.data["focus_session"]
 
     def load(self):
         if not self.save_path.exists():
@@ -201,6 +216,11 @@ class PetDataStore(QObject):
         self.data.setdefault("streak", 0)
         self.data.setdefault("companion_seconds", 0)
         self.data.setdefault("last_tick", 0)
+        if not isinstance(self.data.get("focus_session"), dict):
+            self.data["focus_session"] = deepcopy(DEFAULT_DATA["focus_session"])
+        self.data.setdefault("focus_session", deepcopy(DEFAULT_DATA["focus_session"]))
+        for key, value in DEFAULT_DATA["focus_session"].items():
+            self.data["focus_session"].setdefault(key, value)
         self.data.setdefault("logs", [])
 
     def _today(self):
@@ -391,6 +411,7 @@ class PetDataStore(QObject):
             "status_decay": "状态自然变化",
             "edge_snap_enabled": "贴边吸附",
             "edge_snap_threshold": "贴边距离",
+            "pat_multi_click_talk_threshold": "连续互动阈值",
         }
         self.add_log("设置", f"{labels.get(key, key)}已更新。")
 
@@ -461,6 +482,89 @@ class PetDataStore(QObject):
         goal_seconds = int(self.settings.get("companion_goal_minutes", 10)) * 60
         seconds = int(self.data.get("companion_seconds", 0))
         return seconds, max(1, goal_seconds)
+
+    def start_focus(self, minutes=25, title="专注时间", mode="focus"):
+        minutes = max(1, int(minutes))
+        now_ts = int(datetime.now().timestamp())
+        total_seconds = minutes * 60
+        self.data["focus_session"] = {
+            "active": True,
+            "paused": False,
+            "mode": mode,
+            "title": title,
+            "total_seconds": total_seconds,
+            "remaining_seconds": total_seconds,
+            "ends_at": now_ts + total_seconds,
+        }
+        self.add_log("专注", f"开始「{title}」，预计 {minutes} 分钟。")
+
+    def _sync_focus_remaining(self):
+        session = self.focus_session
+        if not session.get("active") or session.get("paused"):
+            return int(session.get("remaining_seconds", 0))
+        now_ts = int(datetime.now().timestamp())
+        remaining = max(0, int(session.get("ends_at", 0)) - now_ts)
+        session["remaining_seconds"] = remaining
+        return remaining
+
+    def pause_focus(self):
+        session = self.focus_session
+        if not session.get("active") or session.get("paused"):
+            return
+        self._sync_focus_remaining()
+        session["paused"] = True
+        self.add_log("专注", "专注计时已暂停。")
+
+    def resume_focus(self):
+        session = self.focus_session
+        if not session.get("active") or not session.get("paused"):
+            return
+        now_ts = int(datetime.now().timestamp())
+        session["paused"] = False
+        session["ends_at"] = now_ts + int(session.get("remaining_seconds", 0))
+        self.add_log("专注", "专注计时已继续。")
+
+    def cancel_focus(self):
+        session = self.focus_session
+        if not session.get("active"):
+            return
+        title = session.get("title") or "专注"
+        self.data["focus_session"] = deepcopy(DEFAULT_DATA["focus_session"])
+        self.add_log("专注", f"已取消「{title}」。")
+
+    def tick_focus(self):
+        session = self.focus_session
+        if not session.get("active"):
+            return None
+        remaining = self._sync_focus_remaining()
+        if remaining > 0:
+            self._commit()
+            return None
+
+        title = session.get("title") or "专注"
+        mode = session.get("mode", "focus")
+        self.data["focus_session"] = deepcopy(DEFAULT_DATA["focus_session"])
+        if mode == "focus":
+            self.adjust_stats({"mood": 5, "affection": 2, "energy": -4})
+            self.complete_task("focus_once", silent=True)
+            self.stats["coins"] = int(self.stats.get("coins", 0)) + 10
+            self.gain_exp(8)
+            message = f"「{title}」完成，奖励已到账。"
+        else:
+            self.adjust_stats({"energy": 8, "mood": 4})
+            message = f"「{title}」结束，可以继续安排任务。"
+        self.add_log("专注", message)
+        return message
+
+    def focus_progress(self):
+        session = self.focus_session
+        if not session.get("active"):
+            return 0, 0, "暂无专注计时"
+        remaining = self._sync_focus_remaining()
+        total = max(1, int(session.get("total_seconds", 0)))
+        title = session.get("title") or "专注"
+        state = "已暂停" if session.get("paused") else "进行中"
+        return total - remaining, total, f"{title} · {state} · {remaining // 60:02d}:{remaining % 60:02d}"
 
     def export_to(self, path):
         export_path = Path(path)
