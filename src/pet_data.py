@@ -10,15 +10,15 @@ ITEM_CATALOG = {
     "fish": {
         "name": "小鱼",
         "type": "food",
-        "price": 28,
-        "effects": {"hunger": 18, "mood": 4, "affection": 1},
-        "description": "最喜欢的基础食物，恢复饱食度。",
+        "price": 34,
+        "effects": {"hunger": 16, "mood": 2},
+        "description": "稳定的基础食物，主要恢复饱食度。",
     },
     "milk": {
         "name": "牛奶",
         "type": "food",
-        "price": 24,
-        "effects": {"hunger": 10, "energy": 8},
+        "price": 32,
+        "effects": {"hunger": 8, "energy": 7},
         "buff": {
             "effect": "hunger_stop",
             "expiration": 300,
@@ -29,8 +29,8 @@ ITEM_CATALOG = {
     "berry_cake": {
         "name": "蓝莓蛋糕",
         "type": "food",
-        "price": 42,
-        "effects": {"hunger": 12, "mood": 12, "affection": 3},
+        "price": 58,
+        "effects": {"hunger": 10, "mood": 10, "affection": 1},
         "buff": {
             "effect": "mood_guard",
             "expiration": 240,
@@ -41,45 +41,45 @@ ITEM_CATALOG = {
     "snowball": {
         "name": "雪球玩具",
         "type": "toy",
-        "price": 36,
-        "effects": {"mood": 16, "affection": 2, "energy": -3},
+        "price": 70,
+        "effects": {"mood": 12, "affection": 1, "energy": -4},
         "buff": {
             "effect": "coin",
-            "interval": 30,
-            "value": 5,
-            "expiration": 120,
-            "description": "2 分钟内每 30 秒获得 5 金币。",
+            "interval": 45,
+            "value": 2,
+            "expiration": 180,
+            "description": "3 分钟内每 45 秒获得 2 金币。",
         },
         "description": "互动玩具，适合触发玩耍动作。",
     },
     "scarf": {
         "name": "围巾",
         "type": "gift",
-        "price": 64,
-        "effects": {"affection": 8, "mood": 4},
-        "description": "一次性礼物，明显提升好感。",
+        "price": 110,
+        "effects": {"affection": 4, "mood": 3},
+        "description": "珍贵礼物，适合用在好感阶段推进时。",
     },
     "ice": {
         "name": "冰块",
         "type": "food",
-        "price": 12,
-        "effects": {"hunger": 4, "mood": 2},
+        "price": 16,
+        "effects": {"hunger": 3, "mood": 1},
         "description": "便宜的小零食，适合轻量投喂。",
     },
 }
 
 
 TASK_CATALOG = {
-    "daily_login": {"title": "今日登录", "reward": 12, "exp": 8},
-    "companion": {"title": "陪伴 10 分钟", "reward": 18, "exp": 12},
-    "feed_once": {"title": "完成一次投喂", "reward": 16, "exp": 10},
-    "touch_once": {"title": "触发一次互动", "reward": 14, "exp": 10},
-    "sleep_once": {"title": "安排一次休息", "reward": 20, "exp": 12},
-    "walk_once": {"title": "让桌宠走动一次", "reward": 14, "exp": 8},
-    "focus_once": {"title": "完成一次专注", "reward": 24, "exp": 16},
-    "care_plan": {"title": "完成今日关怀", "reward": 22, "exp": 14},
-    "wellness": {"title": "四项状态保持良好", "reward": 20, "exp": 12},
-    "bond_breakthrough": {"title": "好感阶段突破", "reward": 28, "exp": 18},
+    "daily_login": {"title": "今日登录", "reward": 6, "exp": 6},
+    "companion": {"title": "陪伴 10 分钟", "reward": 8, "exp": 10},
+    "feed_once": {"title": "完成一次投喂", "reward": 7, "exp": 8},
+    "touch_once": {"title": "触发一次互动", "reward": 5, "exp": 8},
+    "sleep_once": {"title": "安排一次休息", "reward": 8, "exp": 10},
+    "walk_once": {"title": "让桌宠走动一次", "reward": 5, "exp": 6},
+    "focus_once": {"title": "完成一次专注", "reward": 10, "exp": 14},
+    "care_plan": {"title": "完成今日关怀", "reward": 9, "exp": 10},
+    "wellness": {"title": "四项状态保持优秀", "reward": 12, "exp": 12},
+    "bond_breakthrough": {"title": "好感阶段突破", "reward": 14, "exp": 16},
 }
 
 
@@ -106,10 +106,10 @@ DEFAULT_DATA = {
         "hunger": 82,
         "mood": 88,
         "energy": 76,
-        "affection": 64,
+        "affection": 48,
         "level": 1,
         "exp": 35,
-        "coins": 120,
+        "coins": 80,
     },
     "inventory": {
         "fish": 3,
@@ -288,7 +288,7 @@ class PetDataStore(QObject):
 
     def level_exp_required(self, level=None):
         level = max(1, int(level or self.stats.get("level", 1)))
-        return 100 + (level - 1) * 25 + max(0, level - 4) * 20
+        return 120 + (level - 1) * 45 + max(0, level - 3) * 35
 
     def level_progress(self):
         required = self.level_exp_required()
@@ -351,7 +351,7 @@ class PetDataStore(QObject):
         self._check_wellness_task()
 
     def _check_wellness_task(self):
-        if all(int(self.stats.get(key, 0)) >= 70 for key in ("hunger", "mood", "energy", "affection")):
+        if all(int(self.stats.get(key, 0)) >= 80 for key in ("hunger", "mood", "energy", "affection")):
             self.complete_task("wellness", silent=True)
 
     def _check_affection_breakthrough(self, before, after):
@@ -364,7 +364,7 @@ class PetDataStore(QObject):
         if tier_key in claimed:
             return
         claimed.append(tier_key)
-        bonus = 12 + AFFECTION_TIERS.index(new_tier) * 6
+        bonus = 6 + AFFECTION_TIERS.index(new_tier) * 4
         self.stats["coins"] = int(self.stats.get("coins", 0)) + bonus
         self.complete_task("bond_breakthrough", silent=True)
         self.add_log("好感", f"好感进入「{new_tier['title']}」，额外获得 {bonus} 金币。")
@@ -428,11 +428,8 @@ class PetDataStore(QObject):
             required = self.level_exp_required()
             self.stats["exp"] -= required
             self.stats["level"] = int(self.stats.get("level", 1)) + 1
-            reward = 25 + int(self.stats.get("level", 1)) * 5
+            reward = 12 + int(self.stats.get("level", 1)) * 3
             self.stats["coins"] = int(self.stats.get("coins", 0)) + reward
-            old_affection = int(self.stats.get("affection", 0))
-            self.stats["affection"] = self._clamp_percent(self.stats.get("affection", 0) + 1)
-            self._check_affection_breakthrough(old_affection, int(self.stats.get("affection", 0)))
             self.add_log(
                 "成长",
                 f"等级提升到 Lv.{self.stats['level']}，下一级需要 {self.level_exp_required()} 经验，获得 {reward} 金币。",
@@ -508,14 +505,14 @@ class PetDataStore(QObject):
     def touch(self):
         touches = int(self.data["daily_counts"].get("touch", 0))
         self.data["daily_counts"]["touch"] = touches + 1
-        if touches < 5:
-            mood_gain = 8
-            affection_gain = 3
-        elif touches < 10:
+        if touches < 3:
             mood_gain = 5
             affection_gain = 1
-        else:
+        elif touches < 8:
             mood_gain = 3
+            affection_gain = 0
+        else:
+            mood_gain = 1
             affection_gain = 0
         effects = {"mood": mood_gain}
         if affection_gain:
@@ -530,7 +527,7 @@ class PetDataStore(QObject):
     def daily_care(self):
         if self.tasks.get("care_plan"):
             return False, "今天已经完成过关怀计划。"
-        self.adjust_stats({"hunger": 8, "mood": 6, "energy": 6, "affection": 2})
+        self.adjust_stats({"hunger": 6, "mood": 4, "energy": 4, "affection": 1})
         self.complete_task("care_plan", silent=True)
         self.add_log("关怀", "完成今日关怀计划，四项状态都获得了照顾。")
         return True, "完成今日关怀，状态和好感都提升了。"
@@ -686,9 +683,9 @@ class PetDataStore(QObject):
         self.data["focus_session"] = deepcopy(DEFAULT_DATA["focus_session"])
         if mode == "focus":
             self.data["daily_counts"]["focus"] = int(self.data["daily_counts"].get("focus", 0)) + 1
-            self.adjust_stats({"mood": 5, "affection": 2, "energy": -4})
+            self.adjust_stats({"mood": 4, "affection": 1, "energy": -5})
             self.complete_task("focus_once", silent=True)
-            self.stats["coins"] = int(self.stats.get("coins", 0)) + 10
+            self.stats["coins"] = int(self.stats.get("coins", 0)) + 4
             self.gain_exp(8)
             message = f"「{title}」完成，奖励已到账。"
         else:

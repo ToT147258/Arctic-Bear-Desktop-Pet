@@ -120,26 +120,27 @@ class BackpackPage(QWidget):
 PAGE_STYLE = """
 #pageTitle {
     color: #ffffff;
-    font-size: 30px;
+    font-size: 28px;
     font-weight: 800;
 }
 #pageDescription, #taskItem {
-    color: #b8cbda;
+    color: #b1c2c3;
     font-size: 14px;
 }
 #coinText {
-    color: #ffffff;
+    color: #f4d57f;
     font-size: 22px;
     font-weight: 900;
 }
 #moduleCard {
-    background: #122237;
-    border: 1px solid #2a4c68;
-    border-radius: 10px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #13272d, stop:1 #0d171d);
+    border: 1px solid #2d4448;
+    border-radius: 8px;
     padding: 12px;
 }
 #cardTitle {
-    color: #7ee8ff;
+    color: #8bdcca;
     font-size: 18px;
     font-weight: 800;
 }
@@ -150,26 +151,28 @@ PAGE_STYLE = """
 }
 #moduleAction, #secondaryAction {
     min-height: 36px;
-    color: #06111f;
-    background: #8df3c8;
-    border: 1px solid #8df3c8;
+    color: #06100f;
+    background: #8bdcca;
+    border: 1px solid #8bdcca;
     border-radius: 8px;
     font-weight: 800;
     text-align: center;
 }
 #secondaryAction {
-    color: #dcefff;
-    background: #17283c;
-    border-color: #2c4c68;
+    color: #e7f4f1;
+    background: #11242a;
+    border-color: #36565a;
 }
 #moduleAction:hover {
-    background: #a9ffe0;
+    color: #11130b;
+    background: #d8b45c;
+    border-color: #d8b45c;
 }
 #secondaryAction:hover {
-    background: #1d3853;
-    border-color: #62dff5;
+    background: #162c34;
+    border-color: #74d4c2;
 }
 QLabel {
-    color: #d7e7f3;
+    color: #d7e7e8;
 }
 """

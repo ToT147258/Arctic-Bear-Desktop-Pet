@@ -51,6 +51,9 @@ class PolarBearPetApp(QMainWindow):
         self.focus_summary_label = None
         self.today_summary_label = None
         self.growth_summary_label = None
+        self.care_index_label = None
+        self.signal_caption_label = None
+        self.economy_summary_label = None
         self.recent_log_labels = []
         self.tray_icon = None
         self._touch_burst_count = 0
@@ -130,9 +133,10 @@ class PolarBearPetApp(QMainWindow):
 
     def _build_overview_page(self):
         page = QWidget()
+        page.setObjectName("overviewPage")
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(34, 30, 34, 30)
-        layout.setSpacing(18)
+        layout.setContentsMargins(32, 28, 32, 28)
+        layout.setSpacing(16)
 
         hero = QFrame()
         hero.setObjectName("heroPanel")
@@ -145,7 +149,7 @@ class PolarBearPetApp(QMainWindow):
         eyebrow.setObjectName("eyebrow")
         title = QLabel("北极熊桌宠控制台")
         title.setObjectName("heroTitle")
-        desc = QLabel("当前已经接入真实北极熊序列帧、动作控制、状态成长、背包投喂、本地存档和通知日志。主控台中的操作会直接影响桌宠表现。")
+        desc = QLabel("困难养成曲线已开启：金币更稀缺，好感需要稳定陪伴推进。这里会实时监测桌宠状态、资源压力和今日任务。")
         desc.setWordWrap(True)
         desc.setObjectName("heroDesc")
         hero_text.addWidget(eyebrow)
@@ -171,17 +175,42 @@ class PolarBearPetApp(QMainWindow):
         actions.addWidget(focus)
         actions.addStretch()
 
+        signal_panel = QFrame()
+        signal_panel.setObjectName("signalPanel")
+        signal_layout = QVBoxLayout(signal_panel)
+        signal_layout.setContentsMargins(18, 0, 0, 0)
+        signal_layout.setSpacing(6)
+        signal_heading = QLabel("CARE INDEX")
+        signal_heading.setObjectName("signalHeading")
+        self.care_index_label = QLabel("0")
+        self.care_index_label.setObjectName("signalValue")
+        self.signal_caption_label = QLabel()
+        self.signal_caption_label.setObjectName("signalCaption")
+        self.economy_summary_label = QLabel()
+        self.economy_summary_label.setObjectName("signalNote")
+        self.economy_summary_label.setWordWrap(True)
+        signal_layout.addWidget(signal_heading)
+        signal_layout.addWidget(self.care_index_label)
+        signal_layout.addWidget(self.signal_caption_label)
+        signal_layout.addWidget(self.economy_summary_label)
+        signal_layout.addStretch()
+
+        hero_side = QVBoxLayout()
+        hero_side.setSpacing(14)
+        hero_side.addWidget(signal_panel)
+        hero_side.addLayout(actions)
+
         hero_layout.addLayout(hero_text, 1)
-        hero_layout.addLayout(actions, 0)
+        hero_layout.addLayout(hero_side, 0)
         layout.addWidget(hero)
 
         metrics = QGridLayout()
         metrics.setSpacing(14)
         metric_data = [
             ("hunger", "饱食度", "0%", "投喂食物可恢复", 0),
-            ("mood", "心情值", "0%", "互动和玩具会提升", 0),
+            ("mood", "心情值", "0%", "互动收益已按次数递减", 0),
             ("energy", "体力值", "0%", "睡觉和短休可恢复", 0),
-            ("affection", "好感度", "0%", "分阶段成长并解锁奖励", 0),
+            ("affection", "好感度", "0%", "稀缺成长，阶段突破奖励更少", 0),
         ]
         for index, item in enumerate(metric_data):
             metrics.addWidget(self._metric_card(*item), index // 4, index % 4)
@@ -204,10 +233,10 @@ class PolarBearPetApp(QMainWindow):
             self.focus_summary_label,
             "状态、任务、背包和专注记录会自动保存",
         ]), 1)
-        content.addWidget(self._info_panel("快捷入口", [
-            "侧边栏可切换交互、状态、背包、设置和日志",
-            "托盘菜单可快速投喂、休息和开始专注",
-            "右键桌宠可切换动作与缩放",
+        content.addWidget(self._info_panel("困难养成策略", [
+            "每日任务金币下调，商店价格上调",
+            "连续摸摸只保留少量早期好感收益",
+            "好感突破和升级奖励改为长期目标",
         ]), 1)
         recent_panel = QFrame()
         recent_panel.setObjectName("infoPanel")
@@ -280,7 +309,7 @@ class PolarBearPetApp(QMainWindow):
     def _trigger_pet_interaction(self):
         self.store.touch()
         self._register_touch_burst()
-        self._play_pet_action("touch", "触发互动，心情和好感都提升了。")
+        self._play_pet_action("touch", "触发互动，心情提升；好感收益按今日次数递减。")
 
     def _play_pet_action(self, action_name, bubble=None):
         if not self.pet_window.isVisible():
@@ -421,9 +450,32 @@ class PolarBearPetApp(QMainWindow):
         focus_done, focus_total, focus_text = self.store.focus_progress()
         exp, required = self.store.level_progress()
         affection = self.store.affection_info()
+        care_index = int(
+            (
+                int(stats.get("hunger", 0))
+                + int(stats.get("mood", 0))
+                + int(stats.get("energy", 0))
+                + int(stats.get("affection", 0))
+            )
+            / 4
+        )
         if self.hero_status_label:
             self.hero_status_label.setText(
                 f"Lv.{stats.get('level', 1)} {exp}/{required} EXP / 好感 {affection['title']} / 金币 {stats.get('coins', 0)} / 任务 {done}/{total}"
+            )
+        if self.care_index_label:
+            self.care_index_label.setText(str(care_index))
+        if self.signal_caption_label:
+            if care_index >= 85:
+                caption = "状态优秀，适合推进好感阶段"
+            elif care_index >= 60:
+                caption = "状态稳定，注意资源规划"
+            else:
+                caption = "状态偏低，优先投喂或休息"
+            self.signal_caption_label.setText(caption)
+        if self.economy_summary_label:
+            self.economy_summary_label.setText(
+                f"困难经济：金币 {stats.get('coins', 0)}，好感 {affection['value']}%，今日任务 {done}/{total}。"
             )
         if self.today_summary_label:
             self.today_summary_label.setText(
@@ -466,28 +518,32 @@ class PolarBearPetApp(QMainWindow):
 
 APP_STYLE = """
 QMainWindow {
-    background: #081018;
+    background: #070d11;
+}
+#overviewPage {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 #071014, stop:0.48 #0c171c, stop:1 #15170f);
 }
 #sidebar {
     min-width: 238px;
     max-width: 238px;
-    background: #0d1824;
-    border-right: 1px solid #263847;
+    background: #081219;
+    border-right: 1px solid #2a3f44;
 }
 #brandTitle {
-    color: #f5fbff;
+    color: #f7fbf7;
     font-size: 30px;
     font-weight: 900;
     margin-bottom: 2px;
 }
 #brandSubTitle {
-    color: #9bc7d5;
+    color: #8fb4bd;
     font-size: 14px;
 }
 #brandStatus {
-    color: #0b181d;
-    background: #a6f0cf;
-    border: 1px solid #a6f0cf;
+    color: #11130b;
+    background: #d8b45c;
+    border: 1px solid #d8b45c;
     border-radius: 8px;
     padding: 8px 10px;
     margin-top: 8px;
@@ -496,9 +552,9 @@ QMainWindow {
 }
 QPushButton {
     min-height: 40px;
-    color: #d8e8f0;
-    background: #142333;
-    border: 1px solid #294155;
+    color: #d7e7e8;
+    background: #101f29;
+    border: 1px solid #2a444b;
     border-radius: 8px;
     text-align: left;
     padding-left: 13px;
@@ -506,49 +562,80 @@ QPushButton {
 }
 QPushButton:hover {
     color: #ffffff;
-    background: #1c3345;
-    border-color: #68d8e8;
+    background: #162c34;
+    border-color: #74d4c2;
 }
 QPushButton[active="true"] {
-    color: #081018;
-    background: #8ee6f1;
-    border-color: #8ee6f1;
+    color: #06100f;
+    background: #8bdcca;
+    border-color: #8bdcca;
     font-weight: 800;
 }
 #petToggleButton {
-    color: #081018;
-    background: #a6f0cf;
-    border-color: #a6f0cf;
+    color: #06100f;
+    background: #8bdcca;
+    border-color: #8bdcca;
     font-weight: 800;
 }
 #primaryAction {
     min-width: 156px;
-    color: #081018;
-    background: #f2c66d;
-    border-color: #f2c66d;
+    color: #11130b;
+    background: #d8b45c;
+    border-color: #d8b45c;
     font-weight: 900;
     text-align: center;
 }
 #heroAction {
     min-width: 156px;
-    color: #e8f5f8;
-    background: #172a3a;
-    border-color: #38566a;
+    color: #e7f4f1;
+    background: #11242a;
+    border-color: #36565a;
     font-weight: 800;
     text-align: center;
 }
 #heroPanel {
-    background: #101d29;
-    border: 1px solid #2b4052;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #0f2227, stop:0.55 #0b171d, stop:1 #17190f);
+    border: 1px solid #45635f;
     border-radius: 8px;
+}
+#signalPanel {
+    min-width: 210px;
+    max-width: 230px;
+    background: transparent;
+    border-left: 2px solid #d8b45c;
+}
+#signalHeading {
+    color: #8fb4bd;
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: 0px;
+}
+#signalValue {
+    color: #ffffff;
+    font-size: 56px;
+    font-weight: 900;
+}
+#signalCaption {
+    color: #d8b45c;
+    font-size: 13px;
+    font-weight: 800;
+}
+#signalNote {
+    color: #a8bac0;
+    font-size: 13px;
 }
 #metricCard, #infoPanel {
-    background: #111f2b;
-    border: 1px solid #2a4052;
+    background: #0f1c22;
+    border: 1px solid #2d4448;
     border-radius: 8px;
 }
+#metricCard {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #13272d, stop:1 #0d171d);
+}
 #eyebrow {
-    color: #8ee6f1;
+    color: #8bdcca;
     font-size: 12px;
     font-weight: 800;
     letter-spacing: 0px;
@@ -559,24 +646,24 @@ QPushButton[active="true"] {
     font-weight: 900;
 }
 #heroDesc {
-    color: #b8cbd6;
+    color: #b7c9c9;
     font-size: 14px;
 }
 #heroStatus {
-    color: #f5d88a;
-    background: #201c13;
-    border: 1px solid #6d5626;
+    color: #f4d57f;
+    background: #1f1b12;
+    border: 1px solid #6f5a2b;
     border-radius: 8px;
     padding: 8px 10px;
     font-size: 13px;
     font-weight: 800;
 }
 #panelText, #metricNote {
-    color: #b7c8d1;
+    color: #b1c2c3;
     font-size: 14px;
 }
 #metricName {
-    color: #9bc7d5;
+    color: #91bac0;
     font-size: 13px;
     font-weight: 800;
 }
@@ -588,12 +675,13 @@ QPushButton[active="true"] {
 #metricBar {
     min-height: 8px;
     max-height: 8px;
-    background: #0a141d;
-    border: 1px solid #263847;
+    background: #081114;
+    border: 1px solid #263d3e;
     border-radius: 4px;
 }
 #metricBar::chunk {
-    background: #a6f0cf;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #d8b45c, stop:0.55 #8bdcca, stop:1 #79b8d8);
     border-radius: 3px;
 }
 #panelTitle {
@@ -602,7 +690,7 @@ QPushButton[active="true"] {
     font-weight: 800;
 }
 QStackedWidget {
-    background: #081018;
+    background: #070d11;
 }
 QLabel {
     color: #ecf7ff;

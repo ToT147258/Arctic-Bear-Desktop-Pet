@@ -248,13 +248,13 @@ class StatusPage(QWidget):
 
     def _touch(self):
         self.store.touch()
-        self.play_action("touch", "好感度提升。")
+        self.play_action("touch", "亲近互动已触发，今日好感收益会逐步放缓。")
 
 
 PAGE_STYLE = """
 #pageTitle {
     color: #ffffff;
-    font-size: 30px;
+    font-size: 28px;
     font-weight: 800;
 }
 #pageScroll {
@@ -262,7 +262,7 @@ PAGE_STYLE = """
     border: none;
 }
 #pageDescription, #taskItem, #buffText {
-    color: #b8cbda;
+    color: #b1c2c3;
     font-size: 14px;
 }
 #levelText {
@@ -276,43 +276,50 @@ PAGE_STYLE = """
     font-weight: 800;
 }
 #moduleCard {
-    background: #122237;
-    border: 1px solid #2a4c68;
-    border-radius: 10px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #13272d, stop:1 #0d171d);
+    border: 1px solid #2d4448;
+    border-radius: 8px;
     padding: 12px;
 }
 #cardTitle {
-    color: #7ee8ff;
+    color: #8bdcca;
     font-size: 17px;
     font-weight: 800;
 }
 QProgressBar {
     min-height: 22px;
     color: #ffffff;
-    background: #07111f;
-    border: 1px solid #284961;
+    background: #081114;
+    border: 1px solid #263d3e;
     border-radius: 8px;
     text-align: center;
 }
 QProgressBar::chunk {
-    background: #8df3c8;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #d8b45c, stop:0.55 #8bdcca, stop:1 #79b8d8);
     border-radius: 7px;
 }
 #moduleAction {
     min-height: 38px;
-    color: #06111f;
-    background: #8df3c8;
-    border: 1px solid #8df3c8;
+    color: #06100f;
+    background: #8bdcca;
+    border: 1px solid #8bdcca;
     border-radius: 8px;
     font-weight: 800;
     text-align: center;
 }
+#moduleAction:hover {
+    color: #11130b;
+    background: #d8b45c;
+    border-color: #d8b45c;
+}
 #moduleAction:disabled {
     color: #6f8793;
-    background: #1b2c3d;
-    border-color: #284961;
+    background: #14242b;
+    border-color: #263d3e;
 }
 QLabel {
-    color: #d7e7f3;
+    color: #d7e7e8;
 }
 """
