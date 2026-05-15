@@ -77,6 +77,27 @@ TASK_CATALOG = {
     "sleep_once": {"title": "安排一次休息", "reward": 20, "exp": 12},
     "walk_once": {"title": "让桌宠走动一次", "reward": 14, "exp": 8},
     "focus_once": {"title": "完成一次专注", "reward": 24, "exp": 16},
+    "care_plan": {"title": "完成今日关怀", "reward": 22, "exp": 14},
+    "wellness": {"title": "四项状态保持良好", "reward": 20, "exp": 12},
+    "bond_breakthrough": {"title": "好感阶段突破", "reward": 28, "exp": 18},
+}
+
+
+AFFECTION_TIERS = [
+    {"min": 0, "title": "初见", "description": "还在观察你，适合轻量互动和稳定投喂。"},
+    {"min": 30, "title": "熟悉", "description": "开始记住你的陪伴，普通互动收益稳定。"},
+    {"min": 60, "title": "亲近", "description": "愿意主动回应，礼物和专注陪伴更有价值。"},
+    {"min": 85, "title": "信赖", "description": "已经很安心，阶段突破会带来额外奖励。"},
+    {"min": 100, "title": "挚友", "description": "好感已满，后续重点转为保持状态和连续陪伴。"},
+]
+
+
+DEFAULT_DAILY_COUNTS = {
+    "touch": 0,
+    "feed": 0,
+    "walk": 0,
+    "rest": 0,
+    "focus": 0,
 }
 
 
@@ -114,6 +135,10 @@ DEFAULT_DATA = {
     "today": "",
     "days": 0,
     "streak": 0,
+    "daily_counts": deepcopy(DEFAULT_DAILY_COUNTS),
+    "growth": {
+        "affection_rewards": [],
+    },
     "companion_seconds": 0,
     "last_tick": 0,
     "focus_session": {
@@ -214,6 +239,15 @@ class PetDataStore(QObject):
         self.data.setdefault("today", "")
         self.data.setdefault("days", 0)
         self.data.setdefault("streak", 0)
+        if not isinstance(self.data.get("daily_counts"), dict):
+            self.data["daily_counts"] = deepcopy(DEFAULT_DAILY_COUNTS)
+        self.data.setdefault("daily_counts", deepcopy(DEFAULT_DAILY_COUNTS))
+        for key, value in DEFAULT_DAILY_COUNTS.items():
+            self.data["daily_counts"].setdefault(key, value)
+        if not isinstance(self.data.get("growth"), dict):
+            self.data["growth"] = deepcopy(DEFAULT_DATA["growth"])
+        self.data.setdefault("growth", deepcopy(DEFAULT_DATA["growth"]))
+        self.data["growth"].setdefault("affection_rewards", [])
         self.data.setdefault("companion_seconds", 0)
         self.data.setdefault("last_tick", 0)
         if not isinstance(self.data.get("focus_session"), dict):
@@ -233,6 +267,7 @@ class PetDataStore(QObject):
         old_today = self.data.get("today")
         self.data["today"] = today
         self.data["companion_seconds"] = 0
+        self.data["daily_counts"] = deepcopy(DEFAULT_DAILY_COUNTS)
         for key in TASK_CATALOG:
             self.data["tasks"][key] = False
         if old_today:
@@ -251,6 +286,48 @@ class PetDataStore(QObject):
     def _clamp_percent(self, value):
         return max(0, min(100, int(round(value))))
 
+    def level_exp_required(self, level=None):
+        level = max(1, int(level or self.stats.get("level", 1)))
+        return 100 + (level - 1) * 25 + max(0, level - 4) * 20
+
+    def level_progress(self):
+        required = self.level_exp_required()
+        exp = max(0, int(self.stats.get("exp", 0)))
+        return min(exp, required), required
+
+    def affection_tier(self, value=None):
+        value = self._clamp_percent(self.stats.get("affection", 0) if value is None else value)
+        tier = AFFECTION_TIERS[0]
+        for candidate in AFFECTION_TIERS:
+            if value >= candidate["min"]:
+                tier = candidate
+        return tier
+
+    def affection_info(self):
+        value = self._clamp_percent(self.stats.get("affection", 0))
+        tier = self.affection_tier(value)
+        next_tier = None
+        for candidate in AFFECTION_TIERS:
+            if candidate["min"] > value:
+                next_tier = candidate
+                break
+        return {
+            "value": value,
+            "title": tier["title"],
+            "description": tier["description"],
+            "next_title": next_tier["title"] if next_tier else "已满级",
+            "next_at": next_tier["min"] if next_tier else 100,
+            "to_next": max(0, (next_tier["min"] - value) if next_tier else 0),
+        }
+
+    def growth_summary(self):
+        exp, required = self.level_progress()
+        affection = self.affection_info()
+        return (
+            f"Lv.{self.stats.get('level', 1)} 经验 {exp}/{required}，"
+            f"好感「{affection['title']}」{affection['value']}%。"
+        )
+
     def add_log(self, category, message):
         now = datetime.now().strftime("%H:%M:%S")
         entry = f"[{now}] {category}：{message}"
@@ -265,9 +342,32 @@ class PetDataStore(QObject):
         self._commit()
 
     def adjust_stats(self, effects):
+        old_affection = int(self.stats.get("affection", 0))
         for key, delta in effects.items():
             if key in {"hunger", "mood", "energy", "affection"}:
                 self.stats[key] = self._clamp_percent(self.stats.get(key, 0) + delta)
+        if self.stats.get("affection", 0) > old_affection:
+            self._check_affection_breakthrough(old_affection, int(self.stats.get("affection", 0)))
+        self._check_wellness_task()
+
+    def _check_wellness_task(self):
+        if all(int(self.stats.get(key, 0)) >= 70 for key in ("hunger", "mood", "energy", "affection")):
+            self.complete_task("wellness", silent=True)
+
+    def _check_affection_breakthrough(self, before, after):
+        old_tier = self.affection_tier(before)
+        new_tier = self.affection_tier(after)
+        if new_tier["min"] <= old_tier["min"]:
+            return
+        claimed = self.data["growth"].setdefault("affection_rewards", [])
+        tier_key = str(new_tier["min"])
+        if tier_key in claimed:
+            return
+        claimed.append(tier_key)
+        bonus = 12 + AFFECTION_TIERS.index(new_tier) * 6
+        self.stats["coins"] = int(self.stats.get("coins", 0)) + bonus
+        self.complete_task("bond_breakthrough", silent=True)
+        self.add_log("好感", f"好感进入「{new_tier['title']}」，额外获得 {bonus} 金币。")
 
     def _has_buff(self, effect_name):
         now_ts = int(datetime.now().timestamp())
@@ -320,12 +420,23 @@ class PetDataStore(QObject):
         return messages
 
     def gain_exp(self, amount):
-        self.stats["exp"] = int(self.stats.get("exp", 0)) + int(amount)
-        while self.stats["exp"] >= 100:
-            self.stats["exp"] -= 100
+        amount = max(0, int(amount))
+        if amount <= 0:
+            return
+        self.stats["exp"] = int(self.stats.get("exp", 0)) + amount
+        while self.stats["exp"] >= self.level_exp_required():
+            required = self.level_exp_required()
+            self.stats["exp"] -= required
             self.stats["level"] = int(self.stats.get("level", 1)) + 1
-            self.stats["coins"] = int(self.stats.get("coins", 0)) + 30
-            self.add_log("成长", f"等级提升到 Lv.{self.stats['level']}，获得 30 金币。")
+            reward = 25 + int(self.stats.get("level", 1)) * 5
+            self.stats["coins"] = int(self.stats.get("coins", 0)) + reward
+            old_affection = int(self.stats.get("affection", 0))
+            self.stats["affection"] = self._clamp_percent(self.stats.get("affection", 0) + 1)
+            self._check_affection_breakthrough(old_affection, int(self.stats.get("affection", 0)))
+            self.add_log(
+                "成长",
+                f"等级提升到 Lv.{self.stats['level']}，下一级需要 {self.level_exp_required()} 经验，获得 {reward} 金币。",
+            )
 
     def feed(self, item_id):
         item = ITEM_CATALOG.get(item_id)
@@ -334,6 +445,7 @@ class PetDataStore(QObject):
         if self.inventory.get(item_id, 0) <= 0:
             return False, f"{item['name']}数量不足。"
         self.inventory[item_id] -= 1
+        self.data["daily_counts"]["feed"] = int(self.data["daily_counts"].get("feed", 0)) + 1
         self.adjust_stats(item["effects"])
         self._activate_buff(item_id)
         self.gain_exp(4)
@@ -376,29 +488,57 @@ class PetDataStore(QObject):
         self.stats["coins"] = int(self.stats.get("coins", 0)) + int(task["reward"])
         self.gain_exp(task["exp"])
         if not silent:
-            self.add_log("任务", f"完成「{task['title']}」，获得 {task['reward']} 金币。")
+            self.add_log("任务", f"完成「{task['title']}」，获得 {task['reward']} 金币和 {task['exp']} 经验。")
         else:
             self._commit()
         return True
 
     def rest(self):
+        self.data["daily_counts"]["rest"] = int(self.data["daily_counts"].get("rest", 0)) + 1
         self.adjust_stats({"energy": 20, "mood": 4, "hunger": -5})
         self.complete_task("sleep_once", silent=True)
         self.add_log("休息", "安排了一次休息，体力恢复。")
 
     def walk(self):
+        self.data["daily_counts"]["walk"] = int(self.data["daily_counts"].get("walk", 0)) + 1
         self.adjust_stats({"energy": -3, "mood": 3})
         self.complete_task("walk_once", silent=True)
         self.add_log("互动", "让桌宠走动了一小段。")
 
     def touch(self):
-        self.adjust_stats({"mood": 8, "affection": 3})
+        touches = int(self.data["daily_counts"].get("touch", 0))
+        self.data["daily_counts"]["touch"] = touches + 1
+        if touches < 5:
+            mood_gain = 8
+            affection_gain = 3
+        elif touches < 10:
+            mood_gain = 5
+            affection_gain = 1
+        else:
+            mood_gain = 3
+            affection_gain = 0
+        effects = {"mood": mood_gain}
+        if affection_gain:
+            effects["affection"] = affection_gain
+        self.adjust_stats(effects)
         self.complete_task("touch_once", silent=True)
-        self.add_log("互动", "触发了一次亲近互动。")
+        if affection_gain:
+            self.add_log("互动", f"触发亲近互动，好感 +{affection_gain}。")
+        else:
+            self.add_log("互动", "互动次数较多，今天好感收益已放缓。")
+
+    def daily_care(self):
+        if self.tasks.get("care_plan"):
+            return False, "今天已经完成过关怀计划。"
+        self.adjust_stats({"hunger": 8, "mood": 6, "energy": 6, "affection": 2})
+        self.complete_task("care_plan", silent=True)
+        self.add_log("关怀", "完成今日关怀计划，四项状态都获得了照顾。")
+        return True, "完成今日关怀，状态和好感都提升了。"
 
     def reset_daily_tasks(self):
         for key in TASK_CATALOG:
             self.tasks[key] = False
+        self.data["daily_counts"] = deepcopy(DEFAULT_DAILY_COUNTS)
         self.add_log("任务", "每日任务已重置。")
 
     def set_setting(self, key, value):
@@ -545,6 +685,7 @@ class PetDataStore(QObject):
         mode = session.get("mode", "focus")
         self.data["focus_session"] = deepcopy(DEFAULT_DATA["focus_session"])
         if mode == "focus":
+            self.data["daily_counts"]["focus"] = int(self.data["daily_counts"].get("focus", 0)) + 1
             self.adjust_stats({"mood": 5, "affection": 2, "energy": -4})
             self.complete_task("focus_once", silent=True)
             self.stats["coins"] = int(self.stats.get("coins", 0)) + 10

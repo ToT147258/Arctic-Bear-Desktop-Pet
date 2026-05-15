@@ -50,6 +50,7 @@ class PolarBearPetApp(QMainWindow):
         self.hero_status_label = None
         self.focus_summary_label = None
         self.today_summary_label = None
+        self.growth_summary_label = None
         self.recent_log_labels = []
         self.tray_icon = None
         self._touch_burst_count = 0
@@ -180,7 +181,7 @@ class PolarBearPetApp(QMainWindow):
             ("hunger", "饱食度", "0%", "投喂食物可恢复", 0),
             ("mood", "心情值", "0%", "互动和玩具会提升", 0),
             ("energy", "体力值", "0%", "睡觉和短休可恢复", 0),
-            ("affection", "好感度", "0%", "陪伴与礼物会提升", 0),
+            ("affection", "好感度", "0%", "分阶段成长并解锁奖励", 0),
         ]
         for index, item in enumerate(metric_data):
             metrics.addWidget(self._metric_card(*item), index // 4, index % 4)
@@ -194,8 +195,12 @@ class PolarBearPetApp(QMainWindow):
         self.focus_summary_label = QLabel()
         self.focus_summary_label.setObjectName("panelText")
         self.focus_summary_label.setWordWrap(True)
+        self.growth_summary_label = QLabel()
+        self.growth_summary_label.setObjectName("panelText")
+        self.growth_summary_label.setWordWrap(True)
         content.addWidget(self._info_panel("今日概况", [
             self.today_summary_label,
+            self.growth_summary_label,
             self.focus_summary_label,
             "状态、任务、背包和专注记录会自动保存",
         ]), 1)
@@ -414,14 +419,22 @@ class PolarBearPetApp(QMainWindow):
         total = len(self.store.tasks)
         seconds, goal = self.store.companion_progress()
         focus_done, focus_total, focus_text = self.store.focus_progress()
+        exp, required = self.store.level_progress()
+        affection = self.store.affection_info()
         if self.hero_status_label:
             self.hero_status_label.setText(
-                f"Lv.{stats.get('level', 1)} / 金币 {stats.get('coins', 0)} / 今日任务 {done}/{total}"
+                f"Lv.{stats.get('level', 1)} {exp}/{required} EXP / 好感 {affection['title']} / 金币 {stats.get('coins', 0)} / 任务 {done}/{total}"
             )
         if self.today_summary_label:
             self.today_summary_label.setText(
                 f"陪伴 {seconds // 60}/{max(1, goal // 60)} 分钟，今日任务完成 {done}/{total}。"
             )
+        if self.growth_summary_label:
+            if affection["to_next"]:
+                affection_text = f"距离「{affection['next_title']}」还差 {affection['to_next']} 点好感。"
+            else:
+                affection_text = "好感已达最高阶段。"
+            self.growth_summary_label.setText(f"成长：{self.store.growth_summary()} {affection_text}")
         if self.focus_summary_label:
             if focus_total:
                 percent = min(100, int(focus_done / focus_total * 100))
