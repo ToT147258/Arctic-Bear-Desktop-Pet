@@ -46,7 +46,7 @@ class BackpackPage(QWidget):
 
         title = QLabel("背包、商店与喂养模块")
         title.setObjectName("pageTitle")
-        desc = QLabel("背包现在可以真实扣减数量、购买商品、投喂食物，并联动饱食度、心情、体力、好感和任务奖励。")
+        desc = QLabel("背包现在使用透明背景拟 3D 道具图，支持商品展台、状态洞察、智能配餐、购买和投喂联动。")
         desc.setWordWrap(True)
         desc.setObjectName("pageDescription")
         layout.addWidget(title)
@@ -103,6 +103,10 @@ class BackpackPage(QWidget):
         recommend.setCursor(Qt.PointingHandCursor)
         recommend.setObjectName("secondaryAction")
         recommend.clicked.connect(self._select_recommended_item)
+        smart_serve = QPushButton("智能配餐")
+        smart_serve.setCursor(Qt.PointingHandCursor)
+        smart_serve.setObjectName("moduleAction")
+        smart_serve.clicked.connect(self._smart_serve_recommended_item)
         use_current = QPushButton("使用当前")
         use_current.setCursor(Qt.PointingHandCursor)
         use_current.setObjectName("moduleAction")
@@ -112,6 +116,7 @@ class BackpackPage(QWidget):
         buy_current.setObjectName("secondaryAction")
         buy_current.clicked.connect(self._buy_selected_item)
         action_row.addWidget(recommend)
+        action_row.addWidget(smart_serve)
         action_row.addWidget(use_current)
         action_row.addWidget(buy_current)
 
@@ -263,6 +268,17 @@ class BackpackPage(QWidget):
 
     def _select_recommended_item(self):
         self._select_item(self._recommended_item_id())
+
+    def _smart_serve_recommended_item(self):
+        item_id = self._recommended_item_id()
+        self._select_item(item_id)
+        if self.store.inventory.get(item_id, 0) <= 0:
+            item = ITEM_CATALOG[item_id]
+            if self.store.stats.get("coins", 0) < item["price"]:
+                self.play_action("idle", f"金币不足，暂时无法准备{item['name']}。")
+                return
+            self.store.buy_item(item_id)
+        self._use_item(item_id)
 
     def _use_selected_item(self):
         if self.selected_item_id:

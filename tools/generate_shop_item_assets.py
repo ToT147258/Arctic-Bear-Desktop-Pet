@@ -13,25 +13,15 @@ SCALE = SIZE / CANVAS
 
 
 def draw_background(painter, top, bottom):
-    rect = QRectF(0, 0, CANVAS, CANVAS)
-    gradient = QLinearGradient(0, 0, CANVAS, CANVAS)
-    gradient.setColorAt(0.0, QColor(top))
-    gradient.setColorAt(1.0, QColor(bottom))
-    painter.fillRect(rect, gradient)
-
-    glow = QRadialGradient(QPointF(CANVAS * 0.68, CANVAS * 0.22), CANVAS * 0.56)
-    glow.setColorAt(0.0, QColor(255, 255, 255, 54))
-    glow.setColorAt(0.7, QColor(255, 255, 255, 0))
-    painter.fillRect(rect, glow)
-
-    painter.setPen(QPen(QColor(255, 255, 255, 36), 2))
-    painter.drawRoundedRect(QRectF(22, 22, CANVAS - 44, CANVAS - 44), 34, 34)
+    return
 
 
 def draw_shadow(painter, x, y, w, h, alpha=70):
-    painter.setBrush(QColor(0, 0, 0, alpha))
     painter.setPen(Qt.NoPen)
-    painter.drawEllipse(QRectF(x, y, w, h))
+    for index in range(6, 0, -1):
+        pad = index * 8
+        painter.setBrush(QColor(0, 0, 0, max(8, alpha // (index + 1))))
+        painter.drawEllipse(QRectF(x - pad, y - pad * 0.25, w + pad * 2, h + pad * 0.5))
 
 
 def draw_fish(painter):
@@ -42,6 +32,11 @@ def draw_fish(painter):
     body.moveTo(112, 256)
     body.cubicTo(160, 154, 314, 148, 392, 244)
     body.cubicTo(312, 344, 164, 354, 112, 256)
+    painter.translate(12, 16)
+    painter.setBrush(QColor("#234a53"))
+    painter.setPen(Qt.NoPen)
+    painter.drawPath(body)
+    painter.translate(-12, -16)
     fish_gradient = QLinearGradient(120, 164, 390, 336)
     fish_gradient.setColorAt(0.0, QColor("#f3f8f6"))
     fish_gradient.setColorAt(0.55, QColor("#a9d8e1"))
@@ -55,6 +50,11 @@ def draw_fish(painter):
     tail.lineTo(54, 194)
     tail.cubicTo(78, 246, 78, 270, 54, 322)
     tail.closeSubpath()
+    painter.translate(12, 16)
+    painter.setBrush(QColor("#234a53"))
+    painter.setPen(Qt.NoPen)
+    painter.drawPath(tail)
+    painter.translate(-12, -16)
     painter.setBrush(QColor("#79b8c7"))
     painter.setPen(QPen(QColor("#d8f2f4"), 4))
     painter.drawPath(tail)
@@ -68,11 +68,19 @@ def draw_fish(painter):
     painter.setPen(QPen(QColor(255, 255, 255, 120), 3))
     for x in (188, 226, 264):
         painter.drawArc(QRectF(x, 212, 32, 74), 80 * 16, 170 * 16)
+    painter.setPen(QPen(QColor("#ffffff"), 8))
+    painter.drawArc(QRectF(182, 178, 166, 96), 42 * 16, 104 * 16)
 
 
 def draw_milk(painter):
     draw_background(painter, "#173041", "#101a1b")
     draw_shadow(painter, 142, 374, 228, 38)
+
+    side = QPainterPath()
+    side.addRoundedRect(QRectF(244, 154, 112, 236), 28, 28)
+    painter.setBrush(QColor("#b8d9dc"))
+    painter.setPen(Qt.NoPen)
+    painter.drawPath(side)
 
     bottle = QPainterPath()
     bottle.addRoundedRect(QRectF(164, 144, 184, 246), 32, 32)
@@ -101,11 +109,19 @@ def draw_milk(painter):
     painter.drawText(QRectF(184, 236, 144, 58), Qt.AlignCenter, "MILK")
     painter.setPen(QPen(QColor(255, 255, 255, 110), 8))
     painter.drawLine(202, 162, 202, 352)
+    painter.setPen(QPen(QColor("#9abcc1"), 4))
+    painter.drawLine(314, 174, 314, 374)
 
 
 def draw_cake(painter):
     draw_background(painter, "#2f1d2e", "#171316")
     draw_shadow(painter, 116, 366, 284, 44)
+
+    side = QPainterPath()
+    side.addRoundedRect(QRectF(138, 270, 276, 116), 26, 26)
+    painter.setBrush(QColor("#7b503b"))
+    painter.setPen(Qt.NoPen)
+    painter.drawPath(side)
 
     base = QPainterPath()
     base.addRoundedRect(QRectF(118, 224, 276, 140), 30, 30)
@@ -135,6 +151,9 @@ def draw_cake(painter):
     painter.drawLine(142, 286, 380, 286)
     painter.setPen(QPen(QColor(255, 255, 255, 88), 5))
     painter.drawLine(150, 244, 352, 244)
+    painter.setPen(QPen(QColor("#7a422a"), 4))
+    for x in (192, 244, 306, 352):
+        painter.drawLine(x, 296, x - 16, 350)
 
 
 def draw_snowball(painter):
@@ -151,11 +170,19 @@ def draw_snowball(painter):
 
     painter.setPen(QPen(QColor(255, 255, 255, 126), 5))
     painter.drawArc(QRectF(178, 198, 132, 92), 38 * 16, 118 * 16)
+    painter.setPen(QPen(QColor("#78b6c4"), 3))
+    painter.drawArc(QRectF(316, 286, 74, 52), 40 * 16, 110 * 16)
 
 
 def draw_scarf(painter):
     draw_background(painter, "#2d2430", "#11191b")
     draw_shadow(painter, 118, 362, 276, 42)
+
+    back = QPainterPath()
+    back.addRoundedRect(QRectF(102, 208, 328, 86), 36, 36)
+    painter.setBrush(QColor("#81232c"))
+    painter.setPen(Qt.NoPen)
+    painter.drawPath(back)
 
     scarf = QPainterPath()
     scarf.addRoundedRect(QRectF(92, 190, 328, 86), 36, 36)
@@ -179,6 +206,8 @@ def draw_scarf(painter):
     painter.setPen(QPen(QColor("#d34840"), 8))
     for x in (250, 270, 290):
         painter.drawLine(x, 374, x - 10, 410)
+    painter.setPen(QPen(QColor(255, 255, 255, 70), 5))
+    painter.drawLine(128, 210, 368, 232)
 
 
 def draw_ice(painter):
@@ -210,6 +239,9 @@ def draw_ice(painter):
     painter.setPen(QPen(QColor("#ffffff"), 8))
     painter.drawLine(202, 196, 268, 172)
     painter.drawLine(152, 266, 184, 314)
+    painter.setBrush(QColor(255, 255, 255, 46))
+    painter.setPen(Qt.NoPen)
+    painter.drawPolygon([QPointF(236, 294), QPointF(392, 224), QPointF(354, 360), QPointF(196, 384)])
 
 
 DRAWERS = {
