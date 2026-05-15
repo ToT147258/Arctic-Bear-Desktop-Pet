@@ -7,23 +7,25 @@ from PySide6.QtWidgets import QApplication
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT_DIR = ROOT / "assets" / "shop" / "items"
-SIZE = 512
+SIZE = 1024
+CANVAS = 512
+SCALE = SIZE / CANVAS
 
 
 def draw_background(painter, top, bottom):
-    rect = QRectF(0, 0, SIZE, SIZE)
-    gradient = QLinearGradient(0, 0, SIZE, SIZE)
+    rect = QRectF(0, 0, CANVAS, CANVAS)
+    gradient = QLinearGradient(0, 0, CANVAS, CANVAS)
     gradient.setColorAt(0.0, QColor(top))
     gradient.setColorAt(1.0, QColor(bottom))
     painter.fillRect(rect, gradient)
 
-    glow = QRadialGradient(QPointF(SIZE * 0.68, SIZE * 0.22), SIZE * 0.56)
+    glow = QRadialGradient(QPointF(CANVAS * 0.68, CANVAS * 0.22), CANVAS * 0.56)
     glow.setColorAt(0.0, QColor(255, 255, 255, 54))
     glow.setColorAt(0.7, QColor(255, 255, 255, 0))
     painter.fillRect(rect, glow)
 
     painter.setPen(QPen(QColor(255, 255, 255, 36), 2))
-    painter.drawRoundedRect(QRectF(22, 22, SIZE - 44, SIZE - 44), 34, 34)
+    painter.drawRoundedRect(QRectF(22, 22, CANVAS - 44, CANVAS - 44), 34, 34)
 
 
 def draw_shadow(painter, x, y, w, h, alpha=70):
@@ -226,6 +228,7 @@ def save_icon(name, drawer):
     painter = QPainter(image)
     painter.setRenderHint(QPainter.Antialiasing)
     painter.setRenderHint(QPainter.SmoothPixmapTransform)
+    painter.scale(SCALE, SCALE)
     drawer(painter)
     painter.end()
     image.save(str(OUT_DIR / f"{name}.png"))

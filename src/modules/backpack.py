@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from src.pet_data import ITEM_CATALOG
 
@@ -22,12 +22,25 @@ class BackpackPage(QWidget):
         self.project_root = Path(__file__).resolve().parents[2]
         self.coin_label = None
         self.count_labels = {}
+        self.selected_item_id = None
+        self.showcase_image = None
+        self.showcase_name = None
+        self.showcase_meta = None
+        self.showcase_stock = None
+        self.showcase_effects = None
+        self.showcase_insight = None
         self._build_ui()
         self.store.changed.connect(self.refresh)
         self.refresh()
 
     def _build_ui(self):
-        layout = QVBoxLayout(self)
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setObjectName("pageScroll")
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(34, 30, 34, 30)
         layout.setSpacing(16)
 
@@ -42,6 +55,7 @@ class BackpackPage(QWidget):
         self.coin_label = QLabel()
         self.coin_label.setObjectName("coinText")
         layout.addWidget(self.coin_label)
+        layout.addWidget(self._build_showcase())
 
         grid = QGridLayout()
         grid.setSpacing(12)
@@ -49,7 +63,68 @@ class BackpackPage(QWidget):
             grid.addWidget(self._item_card(item_id, item), index // 3, index % 3)
         layout.addLayout(grid)
         layout.addStretch()
+        self._select_item(next(iter(ITEM_CATALOG)))
+        scroll.setWidget(content)
+        root_layout.addWidget(scroll)
         self.setStyleSheet(PAGE_STYLE)
+
+    def _build_showcase(self):
+        showcase = QFrame()
+        showcase.setObjectName("showcasePanel")
+        layout = QHBoxLayout(showcase)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(18)
+
+        self.showcase_image = QLabel()
+        self.showcase_image.setObjectName("showcaseImage")
+        self.showcase_image.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.showcase_image, 0)
+
+        details = QVBoxLayout()
+        details.setSpacing(8)
+        kicker = QLabel("ARCTIC KITCHEN LAB")
+        kicker.setObjectName("showcaseKicker")
+        self.showcase_name = QLabel()
+        self.showcase_name.setObjectName("showcaseName")
+        self.showcase_meta = QLabel()
+        self.showcase_meta.setObjectName("showcaseMeta")
+        self.showcase_stock = QLabel()
+        self.showcase_stock.setObjectName("showcaseStock")
+        self.showcase_effects = QLabel()
+        self.showcase_effects.setObjectName("showcaseText")
+        self.showcase_effects.setWordWrap(True)
+        self.showcase_insight = QLabel()
+        self.showcase_insight.setObjectName("showcaseInsight")
+        self.showcase_insight.setWordWrap(True)
+
+        action_row = QHBoxLayout()
+        action_row.setSpacing(10)
+        recommend = QPushButton("按状态推荐")
+        recommend.setCursor(Qt.PointingHandCursor)
+        recommend.setObjectName("secondaryAction")
+        recommend.clicked.connect(self._select_recommended_item)
+        use_current = QPushButton("使用当前")
+        use_current.setCursor(Qt.PointingHandCursor)
+        use_current.setObjectName("moduleAction")
+        use_current.clicked.connect(self._use_selected_item)
+        buy_current = QPushButton("购买当前")
+        buy_current.setCursor(Qt.PointingHandCursor)
+        buy_current.setObjectName("secondaryAction")
+        buy_current.clicked.connect(self._buy_selected_item)
+        action_row.addWidget(recommend)
+        action_row.addWidget(use_current)
+        action_row.addWidget(buy_current)
+
+        details.addWidget(kicker)
+        details.addWidget(self.showcase_name)
+        details.addWidget(self.showcase_meta)
+        details.addWidget(self.showcase_stock)
+        details.addWidget(self.showcase_effects)
+        details.addWidget(self.showcase_insight)
+        details.addLayout(action_row)
+        details.addStretch()
+        layout.addLayout(details, 1)
+        return showcase
 
     def _item_card(self, item_id, item):
         card = QFrame()
@@ -60,7 +135,7 @@ class BackpackPage(QWidget):
         image = QLabel()
         image.setObjectName("itemImage")
         image.setAlignment(Qt.AlignCenter)
-        pixmap = self._item_pixmap(item)
+        pixmap = self._item_pixmap(item, 188, 128)
         if not pixmap.isNull():
             image.setPixmap(pixmap)
 
@@ -98,6 +173,11 @@ class BackpackPage(QWidget):
         buy_button.setObjectName("secondaryAction")
         buy_button.clicked.connect(lambda checked=False, key=item_id: self._buy_item(key))
 
+        preview_button = QPushButton("3D 展台")
+        preview_button.setCursor(Qt.PointingHandCursor)
+        preview_button.setObjectName("previewAction")
+        preview_button.clicked.connect(lambda checked=False, key=item_id: self._select_item(key))
+
         layout.addWidget(image)
         layout.addLayout(meta_row)
         layout.addWidget(price)
@@ -105,16 +185,17 @@ class BackpackPage(QWidget):
         layout.addWidget(desc)
         layout.addWidget(effects)
         layout.addWidget(buff)
+        layout.addWidget(preview_button)
         layout.addWidget(use_button)
         layout.addWidget(buy_button)
         return card
 
-    def _item_pixmap(self, item):
+    def _item_pixmap(self, item, width, height):
         image_path = self.project_root / item.get("image", "")
         if not image_path.exists():
             return QPixmap()
         pixmap = QPixmap(str(image_path))
-        return pixmap.scaled(188, 128, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        return pixmap.scaled(width, height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
 
     def _format_effects(self, effects):
         names = {
@@ -139,6 +220,57 @@ class BackpackPage(QWidget):
         self.coin_label.setText(f"当前金币：{self.store.stats.get('coins', 0)}")
         for item_id, label in self.count_labels.items():
             label.setText(f"库存：{self.store.inventory.get(item_id, 0)}")
+        if self.selected_item_id:
+            self._sync_showcase()
+
+    def _select_item(self, item_id):
+        if item_id not in ITEM_CATALOG:
+            return
+        self.selected_item_id = item_id
+        self._sync_showcase()
+
+    def _sync_showcase(self):
+        item = ITEM_CATALOG[self.selected_item_id]
+        pixmap = self._item_pixmap(item, 292, 220)
+        if not pixmap.isNull():
+            self.showcase_image.setPixmap(pixmap)
+        self.showcase_name.setText(item["name"])
+        type_name = TYPE_LABELS.get(item["type"], item["type"])
+        self.showcase_meta.setText(f"{type_name} / {item['price']} 金币 / 困难经济物资")
+        self.showcase_stock.setText(f"库存 {self.store.inventory.get(self.selected_item_id, 0)} · 金币 {self.store.stats.get('coins', 0)}")
+        self.showcase_effects.setText(f"{self._format_effects(item['effects'])}；{self._format_buff(item)}")
+        self.showcase_insight.setText(self._item_insight(self.selected_item_id, item))
+
+    def _item_insight(self, item_id, item):
+        stats = self.store.stats
+        lowest_key = min(("hunger", "mood", "energy", "affection"), key=lambda key: int(stats.get(key, 0)))
+        lowest_names = {"hunger": "饱食", "mood": "心情", "energy": "体力", "affection": "好感"}
+        recommended = self._recommended_item_id()
+        if item_id == recommended:
+            return f"推荐：当前最低状态是{lowest_names[lowest_key]}，这件物品最适合现在使用。"
+        return f"状态洞察：当前最低状态是{lowest_names[lowest_key]}；可点“按状态推荐”切换到更合适的物品。"
+
+    def _recommended_item_id(self):
+        stats = self.store.stats
+        lowest_key = min(("hunger", "mood", "energy", "affection"), key=lambda key: int(stats.get(key, 0)))
+        if lowest_key == "hunger":
+            return "fish" if self.store.stats.get("coins", 0) >= ITEM_CATALOG["fish"]["price"] else "ice"
+        if lowest_key == "energy":
+            return "milk"
+        if lowest_key == "mood":
+            return "berry_cake" if self.store.stats.get("coins", 0) >= ITEM_CATALOG["berry_cake"]["price"] else "snowball"
+        return "scarf" if self.store.stats.get("coins", 0) >= ITEM_CATALOG["scarf"]["price"] else "berry_cake"
+
+    def _select_recommended_item(self):
+        self._select_item(self._recommended_item_id())
+
+    def _use_selected_item(self):
+        if self.selected_item_id:
+            self._use_item(self.selected_item_id)
+
+    def _buy_selected_item(self):
+        if self.selected_item_id:
+            self._buy_item(self.selected_item_id)
 
     def _use_item(self, item_id):
         ok, message = self.store.use_item(item_id)
@@ -159,6 +291,10 @@ PAGE_STYLE = """
     font-size: 28px;
     font-weight: 800;
 }
+#pageScroll {
+    background: transparent;
+    border: none;
+}
 #pageDescription, #taskItem {
     color: #b1c2c3;
     font-size: 14px;
@@ -167,6 +303,48 @@ PAGE_STYLE = """
     color: #f4d57f;
     font-size: 22px;
     font-weight: 900;
+}
+#showcasePanel {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #101f27, stop:0.52 #0c171d, stop:1 #211d12);
+    border: 1px solid #45635f;
+    border-radius: 8px;
+}
+#showcaseImage {
+    min-width: 320px;
+    max-width: 320px;
+    min-height: 236px;
+    max-height: 236px;
+    background: #081114;
+    border: 1px solid #344f50;
+    border-radius: 8px;
+}
+#showcaseKicker {
+    color: #8bdcca;
+    font-size: 12px;
+    font-weight: 900;
+}
+#showcaseName {
+    color: #ffffff;
+    font-size: 30px;
+    font-weight: 900;
+}
+#showcaseMeta {
+    color: #f4d57f;
+    font-size: 15px;
+    font-weight: 800;
+}
+#showcaseStock, #showcaseText {
+    color: #d7e7e8;
+    font-size: 14px;
+}
+#showcaseInsight {
+    color: #9fc9ca;
+    background: #0b1518;
+    border: 1px solid #263d3e;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 14px;
 }
 #itemImage {
     min-height: 132px;
@@ -214,7 +392,7 @@ PAGE_STYLE = """
 #typeBadge-gift {
     background: #d8b45c;
 }
-#moduleAction, #secondaryAction {
+#moduleAction, #secondaryAction, #previewAction {
     min-height: 36px;
     color: #06100f;
     background: #8bdcca;
@@ -228,6 +406,11 @@ PAGE_STYLE = """
     background: #11242a;
     border-color: #36565a;
 }
+#previewAction {
+    color: #f4d57f;
+    background: #1c1a12;
+    border-color: #6f5a2b;
+}
 #moduleAction:hover {
     color: #11130b;
     background: #d8b45c;
@@ -236,6 +419,11 @@ PAGE_STYLE = """
 #secondaryAction:hover {
     background: #162c34;
     border-color: #74d4c2;
+}
+#previewAction:hover {
+    color: #11130b;
+    background: #d8b45c;
+    border-color: #d8b45c;
 }
 QLabel {
     color: #d7e7e8;
