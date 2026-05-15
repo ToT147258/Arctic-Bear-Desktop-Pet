@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMenu,
     QMainWindow,
+    QProgressBar,
     QPushButton,
     QStackedWidget,
     QSystemTrayIcon,
@@ -45,6 +46,11 @@ class PolarBearPetApp(QMainWindow):
         self.pet_window.interaction_requested.connect(self._handle_pet_window_interaction)
         self.nav_buttons = []
         self.metric_value_labels = {}
+        self.metric_bars = {}
+        self.hero_status_label = None
+        self.focus_summary_label = None
+        self.today_summary_label = None
+        self.recent_log_labels = []
         self.tray_icon = None
         self._touch_burst_count = 0
         self._touch_burst_timer = QTimer(self)
@@ -108,7 +114,7 @@ class PolarBearPetApp(QMainWindow):
         title.setObjectName("brandTitle")
         subtitle = QLabel("桌面宠物应用")
         subtitle.setObjectName("brandSubTitle")
-        status = QLabel("中期原型 · PySide6")
+        status = QLabel("实时陪伴控制台")
         status.setObjectName("brandStatus")
         sidebar_layout.addWidget(title)
         sidebar_layout.addWidget(subtitle)
@@ -144,15 +150,24 @@ class PolarBearPetApp(QMainWindow):
         hero_text.addWidget(eyebrow)
         hero_text.addWidget(title)
         hero_text.addWidget(desc)
+        self.hero_status_label = QLabel()
+        self.hero_status_label.setObjectName("heroStatus")
+        hero_text.addWidget(self.hero_status_label)
 
         actions = QVBoxLayout()
+        actions.setSpacing(10)
         show_pet = QPushButton("唤出桌宠")
         show_pet.clicked.connect(self.toggle_pet_window)
         show_pet.setObjectName("primaryAction")
         interact = QPushButton("触发互动")
+        interact.setObjectName("heroAction")
         interact.clicked.connect(self._trigger_pet_interaction)
+        focus = QPushButton("开始专注")
+        focus.setObjectName("heroAction")
+        focus.clicked.connect(self._start_focus_from_tray)
         actions.addWidget(show_pet)
         actions.addWidget(interact)
+        actions.addWidget(focus)
         actions.addStretch()
 
         hero_layout.addLayout(hero_text, 1)
@@ -162,10 +177,10 @@ class PolarBearPetApp(QMainWindow):
         metrics = QGridLayout()
         metrics.setSpacing(14)
         metric_data = [
-            ("hunger", "饱食度", "0%", "投喂食物可恢复"),
-            ("mood", "心情值", "0%", "互动和玩具会提升"),
-            ("affection", "好感度", "0%", "陪伴与礼物会提升"),
-            ("tasks", "任务进度", "0 / 0", "每日任务与奖励"),
+            ("hunger", "饱食度", "0%", "投喂食物可恢复", 0),
+            ("mood", "心情值", "0%", "互动和玩具会提升", 0),
+            ("energy", "体力值", "0%", "睡觉和短休可恢复", 0),
+            ("affection", "好感度", "0%", "陪伴与礼物会提升", 0),
         ]
         for index, item in enumerate(metric_data):
             metrics.addWidget(self._metric_card(*item), index // 4, index % 4)
@@ -173,42 +188,62 @@ class PolarBearPetApp(QMainWindow):
 
         content = QHBoxLayout()
         content.setSpacing(16)
-        content.addWidget(self._info_panel("中期已完成", [
-            "完成 PySide6 控制台与悬浮桌宠",
-            "接入真实北极熊 PNG 序列帧动作",
-            "完成缩放、拖拽、右键菜单和动作过渡",
-            "整理五大模块文档和 UML 图讲解",
+        self.today_summary_label = QLabel()
+        self.today_summary_label.setObjectName("panelText")
+        self.today_summary_label.setWordWrap(True)
+        self.focus_summary_label = QLabel()
+        self.focus_summary_label.setObjectName("panelText")
+        self.focus_summary_label.setWordWrap(True)
+        content.addWidget(self._info_panel("今日概况", [
+            self.today_summary_label,
+            self.focus_summary_label,
+            "状态、任务、背包和专注记录会自动保存",
         ]), 1)
-        content.addWidget(self._info_panel("当前功能重点", [
-            "状态、背包、任务和日志已联动",
-            "设置页可控制缩放、透明度和置顶",
-            "投喂、互动、睡觉会影响状态",
-            "数据会保存到本地 JSON 存档",
+        content.addWidget(self._info_panel("快捷入口", [
+            "侧边栏可切换交互、状态、背包、设置和日志",
+            "托盘菜单可快速投喂、休息和开始专注",
+            "右键桌宠可切换动作与缩放",
         ]), 1)
-        content.addWidget(self._info_panel("最近事件", [
-            "桌宠窗口已启动",
-            "待机眨眼微动持续运行",
-            "动作按钮可直接触发桌宠",
-            "通知页可查看操作日志",
-        ]), 1)
+        recent_panel = QFrame()
+        recent_panel.setObjectName("infoPanel")
+        recent_layout = QVBoxLayout(recent_panel)
+        recent_heading = QLabel("最近日志")
+        recent_heading.setObjectName("panelTitle")
+        recent_layout.addWidget(recent_heading)
+        for _ in range(4):
+            label = QLabel()
+            label.setObjectName("panelText")
+            label.setWordWrap(True)
+            self.recent_log_labels.append(label)
+            recent_layout.addWidget(label)
+        recent_layout.addStretch()
+        content.addWidget(recent_panel, 1)
         layout.addLayout(content)
         layout.addStretch()
         return page
 
-    def _metric_card(self, key, name, value, note):
+    def _metric_card(self, key, name, value, note, progress):
         card = QFrame()
         card.setObjectName("metricCard")
         layout = QVBoxLayout(card)
+        layout.setSpacing(8)
         title = QLabel(name)
         title.setObjectName("metricName")
         number = QLabel(value)
         number.setObjectName("metricValue")
         self.metric_value_labels[key] = number
+        bar = QProgressBar()
+        bar.setRange(0, 100)
+        bar.setValue(progress)
+        bar.setTextVisible(False)
+        bar.setObjectName("metricBar")
+        self.metric_bars[key] = bar
         desc = QLabel(note)
         desc.setObjectName("metricNote")
         desc.setWordWrap(True)
         layout.addWidget(title)
         layout.addWidget(number)
+        layout.addWidget(bar)
         layout.addWidget(desc)
         return card
 
@@ -220,10 +255,13 @@ class PolarBearPetApp(QMainWindow):
         heading.setObjectName("panelTitle")
         layout.addWidget(heading)
         for row in rows:
-            label = QLabel(f"• {row}")
-            label.setWordWrap(True)
-            label.setObjectName("panelText")
-            layout.addWidget(label)
+            if isinstance(row, QLabel):
+                layout.addWidget(row)
+            else:
+                label = QLabel(f"- {row}")
+                label.setWordWrap(True)
+                label.setObjectName("panelText")
+                layout.addWidget(label)
         layout.addStretch()
         return panel
 
@@ -365,15 +403,34 @@ class PolarBearPetApp(QMainWindow):
 
     def _refresh_overview(self):
         stats = self.store.stats
-        for key in ("hunger", "mood", "affection"):
+        for key in ("hunger", "mood", "energy", "affection"):
             label = self.metric_value_labels.get(key)
             if label:
                 label.setText(f"{stats.get(key, 0)}%")
-        task_label = self.metric_value_labels.get("tasks")
-        if task_label:
-            done = sum(1 for value in self.store.tasks.values() if value)
-            total = len(self.store.tasks)
-            task_label.setText(f"{done} / {total}")
+            bar = self.metric_bars.get(key)
+            if bar:
+                bar.setValue(int(stats.get(key, 0)))
+        done = sum(1 for value in self.store.tasks.values() if value)
+        total = len(self.store.tasks)
+        seconds, goal = self.store.companion_progress()
+        focus_done, focus_total, focus_text = self.store.focus_progress()
+        if self.hero_status_label:
+            self.hero_status_label.setText(
+                f"Lv.{stats.get('level', 1)} / 金币 {stats.get('coins', 0)} / 今日任务 {done}/{total}"
+            )
+        if self.today_summary_label:
+            self.today_summary_label.setText(
+                f"陪伴 {seconds // 60}/{max(1, goal // 60)} 分钟，今日任务完成 {done}/{total}。"
+            )
+        if self.focus_summary_label:
+            if focus_total:
+                percent = min(100, int(focus_done / focus_total * 100))
+                self.focus_summary_label.setText(f"专注：{focus_text}，进度 {percent}%。")
+            else:
+                self.focus_summary_label.setText("专注：暂无计时，可从首页、通知页或托盘开始。")
+        for index, label in enumerate(self.recent_log_labels):
+            text = self.store.logs[index] if index < len(self.store.logs) else "暂无更多日志"
+            label.setText(f"- {text}")
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -396,89 +453,143 @@ class PolarBearPetApp(QMainWindow):
 
 APP_STYLE = """
 QMainWindow {
-    background: #07111f;
+    background: #081018;
 }
 #sidebar {
-    min-width: 232px;
-    max-width: 232px;
-    background: #0f1d2f;
-    border-right: 1px solid #25425d;
+    min-width: 238px;
+    max-width: 238px;
+    background: #0d1824;
+    border-right: 1px solid #263847;
 }
 #brandTitle {
-    color: #f7fbff;
-    font-size: 29px;
+    color: #f5fbff;
+    font-size: 30px;
     font-weight: 900;
+    margin-bottom: 2px;
 }
 #brandSubTitle {
-    color: #9edff0;
+    color: #9bc7d5;
     font-size: 14px;
 }
 #brandStatus {
-    color: #89f3c6;
-    background: #132b38;
-    border: 1px solid #2f6f77;
+    color: #0b181d;
+    background: #a6f0cf;
+    border: 1px solid #a6f0cf;
     border-radius: 8px;
-    padding: 7px 10px;
-    margin-bottom: 10px;
+    padding: 8px 10px;
+    margin-top: 8px;
+    margin-bottom: 12px;
+    font-weight: 800;
 }
 QPushButton {
-    min-height: 42px;
-    color: #dcefff;
-    background: #17283c;
-    border: 1px solid #2c4c68;
+    min-height: 40px;
+    color: #d8e8f0;
+    background: #142333;
+    border: 1px solid #294155;
     border-radius: 8px;
     text-align: left;
-    padding-left: 14px;
+    padding-left: 13px;
+    padding-right: 13px;
 }
 QPushButton:hover {
-    background: #1d3853;
-    border-color: #62dff5;
+    color: #ffffff;
+    background: #1c3345;
+    border-color: #68d8e8;
 }
 QPushButton[active="true"] {
-    color: #06111f;
-    background: #83eaff;
-    border-color: #83eaff;
+    color: #081018;
+    background: #8ee6f1;
+    border-color: #8ee6f1;
     font-weight: 800;
 }
-#petToggleButton, #primaryAction {
-    color: #06111f;
-    background: #8df3c8;
-    border-color: #8df3c8;
+#petToggleButton {
+    color: #081018;
+    background: #a6f0cf;
+    border-color: #a6f0cf;
     font-weight: 800;
 }
-#heroPanel, #metricCard, #infoPanel {
-    background: #102238;
-    border: 1px solid #2b4f6c;
-    border-radius: 12px;
+#primaryAction {
+    min-width: 156px;
+    color: #081018;
+    background: #f2c66d;
+    border-color: #f2c66d;
+    font-weight: 900;
+    text-align: center;
+}
+#heroAction {
+    min-width: 156px;
+    color: #e8f5f8;
+    background: #172a3a;
+    border-color: #38566a;
+    font-weight: 800;
+    text-align: center;
+}
+#heroPanel {
+    background: #101d29;
+    border: 1px solid #2b4052;
+    border-radius: 8px;
+}
+#metricCard, #infoPanel {
+    background: #111f2b;
+    border: 1px solid #2a4052;
+    border-radius: 8px;
 }
 #eyebrow {
-    color: #83eaff;
+    color: #8ee6f1;
     font-size: 12px;
     font-weight: 800;
+    letter-spacing: 0px;
 }
 #heroTitle {
     color: #ffffff;
-    font-size: 34px;
+    font-size: 32px;
     font-weight: 900;
 }
-#heroDesc, #panelText, #metricNote {
-    color: #b9ccdc;
+#heroDesc {
+    color: #b8cbd6;
+    font-size: 14px;
+}
+#heroStatus {
+    color: #f5d88a;
+    background: #201c13;
+    border: 1px solid #6d5626;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 13px;
+    font-weight: 800;
+}
+#panelText, #metricNote {
+    color: #b7c8d1;
     font-size: 14px;
 }
 #metricName {
-    color: #9edff0;
+    color: #9bc7d5;
     font-size: 13px;
     font-weight: 800;
 }
 #metricValue {
     color: #ffffff;
-    font-size: 28px;
+    font-size: 27px;
     font-weight: 900;
+}
+#metricBar {
+    min-height: 8px;
+    max-height: 8px;
+    background: #0a141d;
+    border: 1px solid #263847;
+    border-radius: 4px;
+}
+#metricBar::chunk {
+    background: #a6f0cf;
+    border-radius: 3px;
 }
 #panelTitle {
     color: #ffffff;
     font-size: 18px;
     font-weight: 800;
+}
+QStackedWidget {
+    background: #081018;
 }
 QLabel {
     color: #ecf7ff;
