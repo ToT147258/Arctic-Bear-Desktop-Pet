@@ -1,7 +1,17 @@
+from pathlib import Path
+
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from src.pet_data import ITEM_CATALOG
+
+
+TYPE_LABELS = {
+    "food": "食物",
+    "toy": "玩具",
+    "gift": "礼物",
+}
 
 
 class BackpackPage(QWidget):
@@ -9,6 +19,7 @@ class BackpackPage(QWidget):
         super().__init__()
         self.store = store
         self.play_action = play_action
+        self.project_root = Path(__file__).resolve().parents[2]
         self.coin_label = None
         self.count_labels = {}
         self._build_ui()
@@ -46,11 +57,27 @@ class BackpackPage(QWidget):
         layout = QVBoxLayout(card)
         layout.setSpacing(8)
 
+        image = QLabel()
+        image.setObjectName("itemImage")
+        image.setAlignment(Qt.AlignCenter)
+        pixmap = self._item_pixmap(item)
+        if not pixmap.isNull():
+            image.setPixmap(pixmap)
+
+        meta_row = QHBoxLayout()
+        meta_row.setSpacing(8)
         title = QLabel(item["name"])
         title.setObjectName("cardTitle")
+        type_label = QLabel(TYPE_LABELS.get(item["type"], item["type"]))
+        type_label.setObjectName(f"typeBadge-{item['type']}")
         count = QLabel()
         count.setObjectName("countText")
         self.count_labels[item_id] = count
+        meta_row.addWidget(title, 1)
+        meta_row.addWidget(type_label, 0)
+
+        price = QLabel(f"{item['price']} 金币")
+        price.setObjectName("priceText")
         desc = QLabel(item["description"])
         desc.setWordWrap(True)
         desc.setObjectName("taskItem")
@@ -71,7 +98,9 @@ class BackpackPage(QWidget):
         buy_button.setObjectName("secondaryAction")
         buy_button.clicked.connect(lambda checked=False, key=item_id: self._buy_item(key))
 
-        layout.addWidget(title)
+        layout.addWidget(image)
+        layout.addLayout(meta_row)
+        layout.addWidget(price)
         layout.addWidget(count)
         layout.addWidget(desc)
         layout.addWidget(effects)
@@ -79,6 +108,13 @@ class BackpackPage(QWidget):
         layout.addWidget(use_button)
         layout.addWidget(buy_button)
         return card
+
+    def _item_pixmap(self, item):
+        image_path = self.project_root / item.get("image", "")
+        if not image_path.exists():
+            return QPixmap()
+        pixmap = QPixmap(str(image_path))
+        return pixmap.scaled(188, 128, Qt.KeepAspectRatio, Qt.SmoothTransformation)
 
     def _format_effects(self, effects):
         names = {
@@ -132,6 +168,13 @@ PAGE_STYLE = """
     font-size: 22px;
     font-weight: 900;
 }
+#itemImage {
+    min-height: 132px;
+    max-height: 132px;
+    background: #081114;
+    border: 1px solid #263d3e;
+    border-radius: 8px;
+}
 #moduleCard {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 #13272d, stop:1 #0d171d);
@@ -148,6 +191,28 @@ PAGE_STYLE = """
     color: #ffffff;
     font-size: 15px;
     font-weight: 800;
+}
+#priceText {
+    color: #f4d57f;
+    font-size: 18px;
+    font-weight: 900;
+}
+#typeBadge-food, #typeBadge-toy, #typeBadge-gift {
+    min-width: 42px;
+    color: #06100f;
+    border-radius: 8px;
+    padding: 4px 8px;
+    font-size: 12px;
+    font-weight: 900;
+}
+#typeBadge-food {
+    background: #8bdcca;
+}
+#typeBadge-toy {
+    background: #79b8d8;
+}
+#typeBadge-gift {
+    background: #d8b45c;
 }
 #moduleAction, #secondaryAction {
     min-height: 36px;

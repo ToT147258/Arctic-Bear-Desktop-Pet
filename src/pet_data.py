@@ -12,6 +12,7 @@ ITEM_CATALOG = {
         "type": "food",
         "price": 34,
         "effects": {"hunger": 16, "mood": 2},
+        "image": "assets/shop/items/fish.png",
         "description": "稳定的基础食物，主要恢复饱食度。",
     },
     "milk": {
@@ -19,6 +20,7 @@ ITEM_CATALOG = {
         "type": "food",
         "price": 32,
         "effects": {"hunger": 8, "energy": 7},
+        "image": "assets/shop/items/milk.png",
         "buff": {
             "effect": "hunger_stop",
             "expiration": 300,
@@ -31,6 +33,7 @@ ITEM_CATALOG = {
         "type": "food",
         "price": 58,
         "effects": {"hunger": 10, "mood": 10, "affection": 1},
+        "image": "assets/shop/items/berry_cake.png",
         "buff": {
             "effect": "mood_guard",
             "expiration": 240,
@@ -43,6 +46,7 @@ ITEM_CATALOG = {
         "type": "toy",
         "price": 70,
         "effects": {"mood": 12, "affection": 1, "energy": -4},
+        "image": "assets/shop/items/snowball.png",
         "buff": {
             "effect": "coin",
             "interval": 45,
@@ -57,6 +61,7 @@ ITEM_CATALOG = {
         "type": "gift",
         "price": 110,
         "effects": {"affection": 4, "mood": 3},
+        "image": "assets/shop/items/scarf.png",
         "description": "珍贵礼物，适合用在好感阶段推进时。",
     },
     "ice": {
@@ -64,6 +69,7 @@ ITEM_CATALOG = {
         "type": "food",
         "price": 16,
         "effects": {"hunger": 3, "mood": 1},
+        "image": "assets/shop/items/ice.png",
         "description": "便宜的小零食，适合轻量投喂。",
     },
 }
