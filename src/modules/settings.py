@@ -253,54 +253,56 @@ class SettingsPage(QWidget):
 
 PAGE_STYLE = """
 #pageTitle {
-    color: #ffffff;
+    color: #284f66;
     font-size: 30px;
-    font-weight: 800;
+    font-weight: 900;
 }
 #pageDescription, #taskItem {
-    color: #b8cbda;
+    color: #5f7c8d;
     font-size: 14px;
 }
 #moduleCard {
-    background: #122237;
-    border: 1px solid #2a4c68;
-    border-radius: 10px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #ffffff, stop:1 #edfaff);
+    border: 1px solid #c4e5ef;
+    border-radius: 8px;
     padding: 12px;
 }
 #cardTitle {
-    color: #7ee8ff;
+    color: #ff8ebc;
     font-size: 18px;
-    font-weight: 800;
+    font-weight: 900;
 }
 #checkBox {
-    color: #dcefff;
+    color: #31556b;
     font-size: 14px;
 }
 QSlider::groove:horizontal {
     height: 8px;
-    background: #07111f;
-    border: 1px solid #284961;
+    background: #dceff5;
+    border: 1px solid #c7e4ef;
     border-radius: 4px;
 }
 QSlider::handle:horizontal {
     width: 18px;
     margin: -6px 0;
-    background: #8df3c8;
+    background: #ff9fc3;
     border-radius: 9px;
 }
 #moduleAction {
     min-height: 38px;
-    color: #06111f;
-    background: #8df3c8;
-    border: 1px solid #8df3c8;
-    border-radius: 8px;
-    font-weight: 800;
+    color: #ffffff;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #64c9e8, stop:1 #ffadc8);
+    border: 1px solid #ffffff;
+    border-radius: 14px;
+    font-weight: 900;
     text-align: center;
 }
 #moduleAction:hover {
-    background: #a9ffe0;
+    background: #ffd374;
 }
 QLabel {
-    color: #d7e7f3;
+    color: #31556b;
 }
 """

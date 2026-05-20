@@ -1,11 +1,14 @@
 import random
+from math import cos, pi, sin
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QAction, QIcon
+from PySide6.QtCore import QEasingCurve, QPointF, QRectF, QSize, Qt, QPropertyAnimation, QTimer
+from PySide6.QtGui import QAction, QColor, QFont, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
+    QGraphicsDropShadowEffect,
+    QGraphicsOpacityEffect,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -28,11 +31,204 @@ from src.pet_data import PetDataStore
 from src.pet_window import PolarBearPetWindow
 
 
+class AnimatedDashboardRoot(QWidget):
+    def __init__(self):
+        super().__init__()
+        rng = random.Random(18)
+        self._phase = 0.0
+        self._flakes = [
+            (rng.random(), rng.random(), rng.uniform(0.5, 1.7), rng.uniform(0.18, 0.7))
+            for _ in range(58)
+        ]
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(33)
+
+    def _tick(self):
+        self._phase = (self._phase + 0.012) % (pi * 2)
+        self.update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = self.rect()
+
+        bg = QLinearGradient(0, 0, rect.width(), rect.height())
+        bg.setColorAt(0.0, QColor("#f8fcff"))
+        bg.setColorAt(0.38, QColor("#eaf8ff"))
+        bg.setColorAt(0.72, QColor("#fff2f8"))
+        bg.setColorAt(1.0, QColor("#fff8e7"))
+        painter.fillRect(rect, bg)
+
+        self._draw_ribbon(painter, QColor(100, 201, 232, 54), -120, 84, 0.0)
+        self._draw_ribbon(painter, QColor(255, 173, 200, 58), -70, 262, 1.7)
+        self._draw_ribbon(painter, QColor(255, 211, 116, 42), -180, rect.height() - 146, 3.1)
+
+        painter.setPen(QPen(QColor(255, 255, 255, 160), 2))
+        for i, (fx, fy, size, speed) in enumerate(self._flakes):
+            x = fx * rect.width() + sin(self._phase * speed + i) * 18
+            y = (fy * rect.height() + self._phase * 42 * speed) % max(1, rect.height())
+            radius = size * 2.5
+            painter.drawLine(QPointF(x - radius, y), QPointF(x + radius, y))
+            painter.drawLine(QPointF(x, y - radius), QPointF(x, y + radius))
+
+    def _draw_ribbon(self, painter, color, x_offset, y_base, phase):
+        path = QPainterPath()
+        width = self.width()
+        y_shift = sin(self._phase + phase) * 16
+        path.moveTo(x_offset, y_base + y_shift)
+        path.cubicTo(width * 0.22, y_base - 80 + y_shift, width * 0.42, y_base + 92, width * 0.68, y_base + 10)
+        path.cubicTo(width * 0.88, y_base - 52, width + 80, y_base + 68 + y_shift, width + 160, y_base + 10)
+        painter.setPen(QPen(color, 36, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.drawPath(path)
+
+
+class MascotStage(QWidget):
+    def __init__(self, asset_root):
+        super().__init__()
+        self.setObjectName("petStage")
+        self._phase = 0.0
+        self._pixmap = QPixmap()
+        for path in (
+            asset_root / "polar-bear-flat-lively.png",
+            asset_root / "polar-bear-premium.png",
+            asset_root / "polar-bear-realistic.png",
+        ):
+            if path.exists():
+                pixmap = QPixmap(str(path))
+                if not pixmap.isNull():
+                    self._pixmap = pixmap
+                    break
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(33)
+
+    def sizeHint(self):
+        return QSize(232, 268)
+
+    def _tick(self):
+        self._phase = (self._phase + 0.035) % (pi * 2)
+        self.update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        bg = QLinearGradient(rect.topLeft(), rect.bottomRight())
+        bg.setColorAt(0.0, QColor("#ffffff"))
+        bg.setColorAt(0.55, QColor("#eaf9ff"))
+        bg.setColorAt(1.0, QColor("#fff1f7"))
+        painter.setBrush(bg)
+        painter.setPen(QPen(QColor("#b7e5f2"), 1.3))
+        painter.drawRoundedRect(rect, 8, 8)
+
+        painter.setPen(QPen(QColor(255, 173, 200, 170), 2))
+        for i in range(7):
+            x = rect.left() + 22 + i * 30 + sin(self._phase + i) * 4
+            y = rect.top() + 25 + cos(self._phase * 0.8 + i) * 7
+            painter.drawLine(QPointF(x - 5, y), QPointF(x + 5, y))
+            painter.drawLine(QPointF(x, y - 5), QPointF(x, y + 5))
+
+        painter.setPen(QColor("#ff8ebc"))
+        title_font = QFont("Microsoft YaHei UI", 9, QFont.Black)
+        painter.setFont(title_font)
+        painter.drawText(QRectF(rect.left(), rect.top() + 12, rect.width(), 22), Qt.AlignCenter, "小熊在线")
+
+        if not self._pixmap.isNull():
+            bob = sin(self._phase) * 8
+            target = QRectF(rect.center().x() - 82, rect.top() + 54 + bob, 164, 176)
+            scaled = self._pixmap.scaled(
+                target.size().toSize(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+            image_rect = QRectF(
+                rect.center().x() - scaled.width() / 2,
+                target.top() + (target.height() - scaled.height()) / 2,
+                scaled.width(),
+                scaled.height(),
+            )
+            painter.setBrush(QColor(61, 94, 121, 36))
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(QRectF(rect.center().x() - 56, rect.bottom() - 34, 112, 18))
+            painter.drawPixmap(image_rect.toRect(), scaled)
+
+        painter.setPen(QColor("#5f8295"))
+        painter.setFont(QFont("Microsoft YaHei UI", 8, QFont.DemiBold))
+        painter.drawText(QRectF(rect.left(), rect.bottom() - 32, rect.width(), 20), Qt.AlignCenter, "陪伴值实时同步")
+
+
+class CareIndexDial(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("careDial")
+        self._target = 0
+        self._display = 0.0
+        self._caption = ""
+        self._note = ""
+        self._phase = 0.0
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(33)
+
+    def sizeHint(self):
+        return QSize(226, 226)
+
+    def set_data(self, value, caption, note):
+        self._target = max(0, min(100, int(value)))
+        self._caption = caption
+        self._note = note
+        self.update()
+
+    def _tick(self):
+        self._phase = (self._phase + 0.035) % (pi * 2)
+        self._display += (self._target - self._display) * 0.12
+        self.update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        bg = QLinearGradient(rect.topLeft(), rect.bottomRight())
+        bg.setColorAt(0.0, QColor("#ffffff"))
+        bg.setColorAt(0.62, QColor("#f1fffb"))
+        bg.setColorAt(1.0, QColor("#fff4fa"))
+        painter.setBrush(bg)
+        painter.setPen(QPen(QColor("#bfe9f1"), 1.3))
+        painter.drawRoundedRect(rect, 8, 8)
+
+        ring = QRectF(rect.center().x() - 60, rect.top() + 24, 120, 120)
+        painter.setPen(QPen(QColor("#d9edf4"), 12, Qt.SolidLine, Qt.RoundCap))
+        painter.drawArc(ring, 0, 360 * 16)
+        progress_color = QColor("#64c9e8") if self._display < 62 else QColor("#ff9fc3")
+        painter.setPen(QPen(progress_color, 12, Qt.SolidLine, Qt.RoundCap))
+        painter.drawArc(ring, 90 * 16, -int(360 * 16 * self._display / 100))
+
+        painter.setPen(QColor("#284f66"))
+        painter.setFont(QFont("Microsoft YaHei UI", 30, QFont.Black))
+        painter.drawText(ring, Qt.AlignCenter, str(int(round(self._display))))
+        painter.setFont(QFont("Microsoft YaHei UI", 8, QFont.Black))
+        painter.setPen(QColor("#62b8d0"))
+        painter.drawText(QRectF(rect.left(), rect.top() + 12, rect.width(), 18), Qt.AlignCenter, "CARE INDEX")
+        painter.setFont(QFont("Microsoft YaHei UI", 9, QFont.Bold))
+        painter.setPen(QColor("#ff8ebc"))
+        painter.drawText(QRectF(rect.left() + 14, rect.top() + 151, rect.width() - 28, 24), Qt.AlignCenter, self._caption)
+        painter.setFont(QFont("Microsoft YaHei UI", 8))
+        painter.setPen(QColor("#5f788a"))
+        painter.drawText(QRectF(rect.left() + 15, rect.top() + 174, rect.width() - 30, 42), Qt.AlignTop | Qt.AlignHCenter | Qt.TextWordWrap, self._note)
+
+
 class PolarBearPetApp(QMainWindow):
     """北极熊桌宠桌面应用主窗口。"""
 
     def __init__(self):
         super().__init__()
+        app = QApplication.instance()
+        if app:
+            app.setFont(QFont("Microsoft YaHei UI", 10))
         self.setWindowTitle("北极熊桌面宠物系统")
         self.resize(1180, 760)
         self.store = PetDataStore()
@@ -56,6 +252,12 @@ class PolarBearPetApp(QMainWindow):
         self.economy_summary_label = None
         self.recent_log_labels = []
         self.tray_icon = None
+        self.care_dial = None
+        self._glow_targets = []
+        self._panel_animations = []
+        self._metric_bar_animations = {}
+        self._page_transition = None
+        self._did_initial_page_show = False
         self._touch_burst_count = 0
         self._touch_burst_timer = QTimer(self)
         self._touch_burst_timer.setSingleShot(True)
@@ -75,7 +277,8 @@ class PolarBearPetApp(QMainWindow):
         self._refresh_overview()
 
     def _build_ui(self):
-        root = QWidget()
+        root = AnimatedDashboardRoot()
+        root.setObjectName("dashboardRoot")
         layout = QHBoxLayout(root)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -106,6 +309,7 @@ class PolarBearPetApp(QMainWindow):
         self.setCentralWidget(root)
         self.setStyleSheet(APP_STYLE)
         self._switch_page(0)
+        self._start_panel_animations()
 
     def _build_sidebar(self):
         sidebar = QWidget()
@@ -159,6 +363,8 @@ class PolarBearPetApp(QMainWindow):
         self.hero_status_label.setObjectName("heroStatus")
         hero_text.addWidget(self.hero_status_label)
 
+        pet_stage = MascotStage(Path(__file__).resolve().parents[1] / "assets" / "polar_bear")
+
         actions = QVBoxLayout()
         actions.setSpacing(10)
         show_pet = QPushButton("唤出桌宠")
@@ -175,32 +381,15 @@ class PolarBearPetApp(QMainWindow):
         actions.addWidget(focus)
         actions.addStretch()
 
-        signal_panel = QFrame()
-        signal_panel.setObjectName("signalPanel")
-        signal_layout = QVBoxLayout(signal_panel)
-        signal_layout.setContentsMargins(18, 0, 0, 0)
-        signal_layout.setSpacing(6)
-        signal_heading = QLabel("CARE INDEX")
-        signal_heading.setObjectName("signalHeading")
-        self.care_index_label = QLabel("0")
-        self.care_index_label.setObjectName("signalValue")
-        self.signal_caption_label = QLabel()
-        self.signal_caption_label.setObjectName("signalCaption")
-        self.economy_summary_label = QLabel()
-        self.economy_summary_label.setObjectName("signalNote")
-        self.economy_summary_label.setWordWrap(True)
-        signal_layout.addWidget(signal_heading)
-        signal_layout.addWidget(self.care_index_label)
-        signal_layout.addWidget(self.signal_caption_label)
-        signal_layout.addWidget(self.economy_summary_label)
-        signal_layout.addStretch()
+        self.care_dial = CareIndexDial()
 
         hero_side = QVBoxLayout()
         hero_side.setSpacing(14)
-        hero_side.addWidget(signal_panel)
+        hero_side.addWidget(self.care_dial)
         hero_side.addLayout(actions)
 
         hero_layout.addLayout(hero_text, 1)
+        hero_layout.addWidget(pet_stage, 0)
         hero_layout.addLayout(hero_side, 0)
         layout.addWidget(hero)
 
@@ -259,6 +448,7 @@ class PolarBearPetApp(QMainWindow):
     def _metric_card(self, key, name, value, note, progress):
         card = QFrame()
         card.setObjectName("metricCard")
+        card.setProperty("tone", key)
         layout = QVBoxLayout(card)
         layout.setSpacing(8)
         title = QLabel(name)
@@ -281,6 +471,21 @@ class PolarBearPetApp(QMainWindow):
         layout.addWidget(desc)
         return card
 
+    def _start_panel_animations(self):
+        self._glow_targets.clear()
+
+    def _animate_progress_value(self, key, bar, value):
+        value = max(0, min(100, int(value)))
+        if bar.value() == value:
+            return
+        animation = QPropertyAnimation(bar, b"value", self)
+        animation.setStartValue(bar.value())
+        animation.setEndValue(value)
+        animation.setDuration(520)
+        animation.setEasingCurve(QEasingCurve.OutCubic)
+        animation.start()
+        self._metric_bar_animations[key] = animation
+
     def _info_panel(self, title, rows):
         panel = QFrame()
         panel.setObjectName("infoPanel")
@@ -301,6 +506,20 @@ class PolarBearPetApp(QMainWindow):
 
     def _switch_page(self, index):
         self.stack.setCurrentIndex(index)
+        page = self.stack.currentWidget()
+        if page and self._did_initial_page_show:
+            effect = QGraphicsOpacityEffect(page)
+            effect.setOpacity(0.0)
+            page.setGraphicsEffect(effect)
+            self._page_transition = QPropertyAnimation(effect, b"opacity", self)
+            self._page_transition.setStartValue(0.0)
+            self._page_transition.setEndValue(1.0)
+            self._page_transition.setDuration(220)
+            self._page_transition.setEasingCurve(QEasingCurve.OutCubic)
+            self._page_transition.start()
+        elif page:
+            page.setGraphicsEffect(None)
+            self._did_initial_page_show = True
         for i, button in enumerate(self.nav_buttons):
             button.setProperty("active", i == index)
             button.style().unpolish(button)
@@ -443,7 +662,7 @@ class PolarBearPetApp(QMainWindow):
                 label.setText(f"{stats.get(key, 0)}%")
             bar = self.metric_bars.get(key)
             if bar:
-                bar.setValue(int(stats.get(key, 0)))
+                self._animate_progress_value(key, bar, int(stats.get(key, 0)))
         done = sum(1 for value in self.store.tasks.values() if value)
         total = len(self.store.tasks)
         seconds, goal = self.store.companion_progress()
@@ -463,6 +682,15 @@ class PolarBearPetApp(QMainWindow):
             self.hero_status_label.setText(
                 f"Lv.{stats.get('level', 1)} {exp}/{required} EXP / 好感 {affection['title']} / 金币 {stats.get('coins', 0)} / 任务 {done}/{total}"
             )
+        if care_index >= 85:
+            dial_caption = "状态很好"
+        elif care_index >= 60:
+            dial_caption = "稳定养成中"
+        else:
+            dial_caption = "需要照顾"
+        dial_note = f"金币 {stats.get('coins', 0)} / 好感 {affection['value']}% / 任务 {done}/{total}"
+        if self.care_dial:
+            self.care_dial.set_data(care_index, dial_caption, dial_note)
         if self.care_index_label:
             self.care_index_label.setText(str(care_index))
         if self.signal_caption_label:
@@ -517,33 +745,38 @@ class PolarBearPetApp(QMainWindow):
 
 
 APP_STYLE = """
+* {
+    font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", Arial;
+}
 QMainWindow {
-    background: #070d11;
+    background: #f5fbff;
 }
 #overviewPage {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-        stop:0 #071014, stop:0.48 #0c171c, stop:1 #15170f);
+    background: transparent;
 }
 #sidebar {
     min-width: 238px;
     max-width: 238px;
-    background: #081219;
-    border-right: 1px solid #2a3f44;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 rgba(255, 255, 255, 226), stop:0.58 rgba(239, 249, 255, 218), stop:1 rgba(255, 246, 250, 218));
+    border-right: 1px solid rgba(120, 190, 214, 150);
 }
 #brandTitle {
-    color: #f7fbf7;
+    color: #25546b;
     font-size: 30px;
     font-weight: 900;
     margin-bottom: 2px;
 }
 #brandSubTitle {
-    color: #8fb4bd;
+    color: #668497;
     font-size: 14px;
+    font-weight: 700;
 }
 #brandStatus {
-    color: #11130b;
-    background: #d8b45c;
-    border: 1px solid #d8b45c;
+    color: #2c5263;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #ffffff, stop:0.55 #e9fbff, stop:1 #fff1f7);
+    border: 1px solid #9bdced;
     border-radius: 8px;
     padding: 8px 10px;
     margin-top: 8px;
@@ -552,147 +785,189 @@ QMainWindow {
 }
 QPushButton {
     min-height: 40px;
-    color: #d7e7e8;
-    background: #101f29;
-    border: 1px solid #2a444b;
+    color: #416074;
+    background: rgba(255, 255, 255, 210);
+    border: 1px solid #c5e3ee;
     border-radius: 8px;
     text-align: left;
     padding-left: 13px;
     padding-right: 13px;
+    font-weight: 800;
 }
 QPushButton:hover {
-    color: #ffffff;
-    background: #162c34;
-    border-color: #74d4c2;
+    color: #263f55;
+    background: #ffffff;
+    border-color: #80cfe6;
 }
 QPushButton[active="true"] {
-    color: #06100f;
-    background: #8bdcca;
-    border-color: #8bdcca;
-    font-weight: 800;
+    color: #ffffff;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #64c9e8, stop:0.55 #85decf, stop:1 #ffb8d1);
+    border-color: #ffffff;
+    font-weight: 900;
 }
 #petToggleButton {
-    color: #06100f;
-    background: #8bdcca;
-    border-color: #8bdcca;
-    font-weight: 800;
+    color: #ffffff;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #55bddf, stop:1 #ffadc8);
+    border-color: rgba(255, 255, 255, 210);
+    font-weight: 900;
+    text-align: center;
 }
 #primaryAction {
     min-width: 156px;
-    color: #11130b;
-    background: #d8b45c;
-    border-color: #d8b45c;
+    color: #ffffff;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #ff9fc3, stop:1 #ffc46b);
+    border-color: #ffffff;
+    border-radius: 8px;
     font-weight: 900;
     text-align: center;
 }
 #heroAction {
     min-width: 156px;
-    color: #e7f4f1;
-    background: #11242a;
-    border-color: #36565a;
+    color: #31526a;
+    background: rgba(255, 255, 255, 210);
+    border-color: #bde9f2;
+    border-radius: 8px;
     font-weight: 800;
     text-align: center;
 }
 #heroPanel {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 #0f2227, stop:0.55 #0b171d, stop:1 #17190f);
-    border: 1px solid #45635f;
+        stop:0 rgba(255, 255, 255, 232), stop:0.5 rgba(238, 251, 255, 222), stop:1 rgba(255, 242, 248, 225));
+    border: 1px solid rgba(145, 216, 236, 180);
     border-radius: 8px;
+}
+#petStage {
+    min-width: 210px;
+    max-width: 210px;
+    min-height: 246px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #ffffff, stop:0.56 #eaf9ff, stop:1 #fff4fa);
+    border: 1px solid #c7eaf3;
+    border-radius: 8px;
+}
+#sparkleText {
+    color: #ff8dbc;
+    font-size: 12px;
+    font-weight: 900;
+}
+#petPreviewImage {
+    min-height: 178px;
+}
+#petStageNote {
+    color: #5f8295;
+    font-size: 12px;
+    font-weight: 800;
 }
 #signalPanel {
     min-width: 210px;
     max-width: 230px;
-    background: transparent;
-    border-left: 2px solid #d8b45c;
+    background: rgba(255, 255, 255, 205);
+    border: 1px solid #bbe8f0;
+    border-radius: 8px;
 }
 #signalHeading {
-    color: #8fb4bd;
+    color: #6c8fa1;
     font-size: 12px;
     font-weight: 900;
     letter-spacing: 0px;
 }
 #signalValue {
-    color: #ffffff;
+    color: #25546b;
     font-size: 56px;
     font-weight: 900;
 }
 #signalCaption {
-    color: #d8b45c;
+    color: #ff8ebc;
     font-size: 13px;
     font-weight: 800;
 }
 #signalNote {
-    color: #a8bac0;
+    color: #658092;
     font-size: 13px;
 }
 #metricCard, #infoPanel {
-    background: #0f1c22;
-    border: 1px solid #2d4448;
+    background: rgba(255, 255, 255, 215);
+    border: 1px solid #c4e5ef;
     border-radius: 8px;
 }
 #metricCard {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #13272d, stop:1 #0d171d);
+        stop:0 #ffffff, stop:1 #edfaff);
+}
+#metricCard[tone="mood"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #fff8fc, stop:1 #ffeaf3);
+}
+#metricCard[tone="energy"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #fffdf4, stop:1 #fff0c9);
+}
+#metricCard[tone="affection"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #f4fff9, stop:1 #dff7ee);
 }
 #eyebrow {
-    color: #8bdcca;
+    color: #50b9d2;
     font-size: 12px;
     font-weight: 800;
     letter-spacing: 0px;
 }
 #heroTitle {
-    color: #ffffff;
+    color: #244f66;
     font-size: 32px;
     font-weight: 900;
 }
 #heroDesc {
-    color: #b7c9c9;
+    color: #5f7c8c;
     font-size: 14px;
 }
 #heroStatus {
-    color: #f4d57f;
-    background: #1f1b12;
-    border: 1px solid #6f5a2b;
+    color: #3d6276;
+    background: #ffffff;
+    border: 1px solid #ffd1df;
     border-radius: 8px;
     padding: 8px 10px;
     font-size: 13px;
     font-weight: 800;
 }
 #panelText, #metricNote {
-    color: #b1c2c3;
+    color: #5e7887;
     font-size: 14px;
 }
 #metricName {
-    color: #91bac0;
+    color: #668da1;
     font-size: 13px;
     font-weight: 800;
 }
 #metricValue {
-    color: #ffffff;
+    color: #294f66;
     font-size: 27px;
     font-weight: 900;
 }
 #metricBar {
     min-height: 8px;
     max-height: 8px;
-    background: #081114;
-    border: 1px solid #263d3e;
+    background: #dceff5;
+    border: 1px solid #c7e4ef;
     border-radius: 4px;
 }
 #metricBar::chunk {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 #d8b45c, stop:0.55 #8bdcca, stop:1 #79b8d8);
+        stop:0 #ffabc8, stop:0.45 #ffd374, stop:0.72 #8de1d0, stop:1 #63c7e7);
     border-radius: 3px;
 }
 #panelTitle {
-    color: #ffffff;
+    color: #2c5369;
     font-size: 18px;
     font-weight: 800;
 }
 QStackedWidget {
-    background: #070d11;
+    background: transparent;
 }
 QLabel {
-    color: #ecf7ff;
+    color: #31556b;
 }
 """

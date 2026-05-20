@@ -253,73 +253,73 @@ class StatusPage(QWidget):
 
 PAGE_STYLE = """
 #pageTitle {
-    color: #ffffff;
+    color: #284f66;
     font-size: 28px;
-    font-weight: 800;
+    font-weight: 900;
 }
 #pageScroll {
     background: transparent;
     border: none;
 }
 #pageDescription, #taskItem, #buffText {
-    color: #b1c2c3;
+    color: #5f7c8d;
     font-size: 14px;
 }
 #levelText {
-    color: #ffffff;
+    color: #294f66;
     font-size: 22px;
     font-weight: 900;
 }
 #sectionTitle {
-    color: #ffffff;
+    color: #2d566d;
     font-size: 18px;
-    font-weight: 800;
+    font-weight: 900;
 }
 #moduleCard {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #13272d, stop:1 #0d171d);
-    border: 1px solid #2d4448;
+        stop:0 #ffffff, stop:1 #edfaff);
+    border: 1px solid #c4e5ef;
     border-radius: 8px;
     padding: 12px;
 }
 #cardTitle {
-    color: #8bdcca;
+    color: #ff8ebc;
     font-size: 17px;
-    font-weight: 800;
+    font-weight: 900;
 }
 QProgressBar {
     min-height: 22px;
-    color: #ffffff;
-    background: #081114;
-    border: 1px solid #263d3e;
-    border-radius: 8px;
+    color: #294f66;
+    background: #dceff5;
+    border: 1px solid #c7e4ef;
+    border-radius: 11px;
     text-align: center;
+    font-weight: 800;
 }
 QProgressBar::chunk {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 #d8b45c, stop:0.55 #8bdcca, stop:1 #79b8d8);
-    border-radius: 7px;
+        stop:0 #ffabc8, stop:0.45 #ffd374, stop:0.72 #8de1d0, stop:1 #63c7e7);
+    border-radius: 10px;
 }
 #moduleAction {
     min-height: 38px;
-    color: #06100f;
-    background: #8bdcca;
-    border: 1px solid #8bdcca;
-    border-radius: 8px;
-    font-weight: 800;
+    color: #ffffff;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #64c9e8, stop:1 #ffadc8);
+    border: 1px solid #ffffff;
+    border-radius: 14px;
+    font-weight: 900;
     text-align: center;
 }
 #moduleAction:hover {
-    color: #11130b;
     background: #d8b45c;
-    border-color: #d8b45c;
 }
 #moduleAction:disabled {
-    color: #6f8793;
-    background: #14242b;
-    border-color: #263d3e;
+    color: #8fa8b7;
+    background: #e9f4f8;
+    border-color: #d1e7ee;
 }
 QLabel {
-    color: #d7e7e8;
+    color: #31556b;
 }
 """

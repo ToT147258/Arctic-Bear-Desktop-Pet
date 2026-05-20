@@ -303,27 +303,27 @@ class BackpackPage(QWidget):
 
 PAGE_STYLE = """
 #pageTitle {
-    color: #ffffff;
+    color: #284f66;
     font-size: 28px;
-    font-weight: 800;
+    font-weight: 900;
 }
 #pageScroll {
     background: transparent;
     border: none;
 }
 #pageDescription, #taskItem {
-    color: #b1c2c3;
+    color: #5f7c8d;
     font-size: 14px;
 }
 #coinText {
-    color: #f4d57f;
+    color: #ff8ebc;
     font-size: 22px;
     font-weight: 900;
 }
 #showcasePanel {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 #101f27, stop:0.52 #0c171d, stop:1 #211d12);
-    border: 1px solid #45635f;
+        stop:0 #ffffff, stop:0.48 #eaf9ff, stop:1 #fff3f8);
+    border: 1px solid #b9e6f2;
     border-radius: 8px;
 }
 #showcaseImage {
@@ -331,33 +331,33 @@ PAGE_STYLE = """
     max-width: 320px;
     min-height: 236px;
     max-height: 236px;
-    background: #081114;
-    border: 1px solid #344f50;
+    background: #f8fcff;
+    border: 1px solid #c4e5ef;
     border-radius: 8px;
 }
 #showcaseKicker {
-    color: #8bdcca;
+    color: #61b8d0;
     font-size: 12px;
     font-weight: 900;
 }
 #showcaseName {
-    color: #ffffff;
+    color: #284f66;
     font-size: 30px;
     font-weight: 900;
 }
 #showcaseMeta {
-    color: #f4d57f;
+    color: #ff8ebc;
     font-size: 15px;
     font-weight: 800;
 }
 #showcaseStock, #showcaseText {
-    color: #d7e7e8;
+    color: #31556b;
     font-size: 14px;
 }
 #showcaseInsight {
-    color: #9fc9ca;
-    background: #0b1518;
-    border: 1px solid #263d3e;
+    color: #5f7c8d;
+    background: #ffffff;
+    border: 1px solid #ffd1df;
     border-radius: 8px;
     padding: 8px 10px;
     font-size: 14px;
@@ -365,83 +365,80 @@ PAGE_STYLE = """
 #itemImage {
     min-height: 132px;
     max-height: 132px;
-    background: #081114;
-    border: 1px solid #263d3e;
+    background: #f8fcff;
+    border: 1px solid #c4e5ef;
     border-radius: 8px;
 }
 #moduleCard {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #13272d, stop:1 #0d171d);
-    border: 1px solid #2d4448;
+        stop:0 #ffffff, stop:1 #edfaff);
+    border: 1px solid #c4e5ef;
     border-radius: 8px;
     padding: 12px;
 }
 #cardTitle {
-    color: #8bdcca;
+    color: #61b8d0;
     font-size: 18px;
-    font-weight: 800;
+    font-weight: 900;
 }
 #countText {
-    color: #ffffff;
+    color: #294f66;
     font-size: 15px;
     font-weight: 800;
 }
 #priceText {
-    color: #f4d57f;
+    color: #ff8ebc;
     font-size: 18px;
     font-weight: 900;
 }
 #typeBadge-food, #typeBadge-toy, #typeBadge-gift {
     min-width: 42px;
-    color: #06100f;
+    color: #ffffff;
     border-radius: 8px;
     padding: 4px 8px;
     font-size: 12px;
     font-weight: 900;
 }
 #typeBadge-food {
-    background: #8bdcca;
+    background: #85decf;
 }
 #typeBadge-toy {
-    background: #79b8d8;
+    background: #64c9e8;
 }
 #typeBadge-gift {
-    background: #d8b45c;
+    background: #ffadc8;
 }
 #moduleAction, #secondaryAction, #previewAction {
     min-height: 36px;
-    color: #06100f;
-    background: #8bdcca;
-    border: 1px solid #8bdcca;
-    border-radius: 8px;
-    font-weight: 800;
+    color: #ffffff;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #64c9e8, stop:1 #ffadc8);
+    border: 1px solid #ffffff;
+    border-radius: 14px;
+    font-weight: 900;
     text-align: center;
 }
 #secondaryAction {
-    color: #e7f4f1;
-    background: #11242a;
-    border-color: #36565a;
+    color: #31556b;
+    background: #ffffff;
+    border-color: #c7e4ef;
 }
 #previewAction {
-    color: #f4d57f;
-    background: #1c1a12;
-    border-color: #6f5a2b;
+    color: #ffffff;
+    background: #ffd374;
+    border-color: #ffffff;
 }
 #moduleAction:hover {
-    color: #11130b;
     background: #d8b45c;
-    border-color: #d8b45c;
 }
 #secondaryAction:hover {
-    background: #162c34;
-    border-color: #74d4c2;
+    background: #fff4fa;
+    border-color: #ffadc8;
 }
 #previewAction:hover {
-    color: #11130b;
-    background: #d8b45c;
-    border-color: #d8b45c;
+    background: #ffadc8;
 }
 QLabel {
-    color: #d7e7e8;
+    color: #31556b;
 }
 """

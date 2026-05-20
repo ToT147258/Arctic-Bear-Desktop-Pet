@@ -108,54 +108,56 @@ class InteractionPage(QWidget):
 
 PAGE_STYLE = """
 #pageTitle {
-    color: #ffffff;
+    color: #284f66;
     font-size: 30px;
-    font-weight: 800;
+    font-weight: 900;
 }
 #pageDescription {
-    color: #b8cbda;
+    color: #5f7c8d;
     font-size: 15px;
 }
 #sectionTitle {
-    color: #ffffff;
+    color: #2d566d;
     font-size: 18px;
-    font-weight: 800;
+    font-weight: 900;
     margin-top: 8px;
 }
 #highlightCard {
-    background: #122237;
-    border: 1px solid #2a4c68;
-    border-radius: 10px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #ffffff, stop:1 #edfaff);
+    border: 1px solid #c4e5ef;
+    border-radius: 8px;
     padding: 12px;
 }
 #highlightName {
-    color: #9edff0;
+    color: #61b8d0;
     font-size: 13px;
-    font-weight: 800;
+    font-weight: 900;
 }
 #highlightValue {
-    color: #ffffff;
+    color: #294f66;
     font-size: 24px;
     font-weight: 900;
 }
 #highlightNote {
-    color: #b9ccdc;
+    color: #5e7887;
     font-size: 13px;
 }
 #actionButton {
     min-height: 76px;
-    color: #06111f;
-    background: #8df3c8;
-    border: 1px solid #8df3c8;
-    border-radius: 8px;
-    font-weight: 800;
+    color: #ffffff;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 #64c9e8, stop:0.55 #85decf, stop:1 #ffadc8);
+    border: 1px solid #ffffff;
+    border-radius: 16px;
+    font-weight: 900;
     text-align: center;
 }
 #actionButton:hover {
-    background: #a9ffe0;
+    background: #ffd374;
 }
 QLabel {
-    color: #d7e7f3;
+    color: #31556b;
     font-size: 14px;
 }
 """
