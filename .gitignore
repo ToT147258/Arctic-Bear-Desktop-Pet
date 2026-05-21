@@ -17,6 +17,7 @@ env/
 # Local diagnostics and generated scratch output
 diagnostics/
 tmp_video_samples/
+tmp_video_edge_sheets/
 tmp_*.png
 data/save.json
 data/*.json
@@ -46,6 +47,8 @@ assets/polar_bear/role/PolarBear/action/*.png
 !assets/polar_bear/role/PolarBear/action/video5141_sleep_prepare_stable_v1_*.png
 !assets/polar_bear/role/PolarBear/action/video5141_sleep_loop_stable_v1_*.png
 !assets/polar_bear/role/PolarBear/action/video_drag_smooth_v1_*.png
+!assets/polar_bear/role/PolarBear/action/edge_left_wall_v1_*.png
+!assets/polar_bear/role/PolarBear/action/edge_right_wall_v1_*.png
 
 # IDE/editor files
 .idea/

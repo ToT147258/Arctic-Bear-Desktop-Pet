@@ -58,6 +58,18 @@
     "frame_refresh": 0.04,
     "next_action": "sleep"
   },
+  "edge_left": {
+    "images": "edge_left_wall_v1",
+    "act_num": 1,
+    "frame_refresh": 0.045,
+    "loop": true
+  },
+  "edge_right": {
+    "images": "edge_right_wall_v1",
+    "act_num": 1,
+    "frame_refresh": 0.045,
+    "loop": true
+  },
   "drag": {
     "images": "video_drag_smooth_v1",
     "act_num": 1,

@@ -28,7 +28,7 @@ class InteractionPage(QWidget):
         metrics.setSpacing(12)
         for index, item in enumerate(
             [
-                ("动作组", "8 组", "待机、走路、跳跃、挥手、互动、拖拽、睡觉"),
+                ("动作组", "10 组", "待机、走路、跳跃、挥手、互动、拖拽、睡觉、贴边"),
                 ("点击逻辑", "已处理", "单击互动，双击挥手，拖拽不误触发"),
                 ("素材来源", "PNG 序列", "兼容旧项目 role/action 动作配置"),
             ]
@@ -47,6 +47,8 @@ class InteractionPage(QWidget):
             ("挥手", "wave", lambda: self._play("wave", "挥手动作已触发。")),
             ("向左走", "walk_left", self._walk_left),
             ("向右走", "walk_right", self._walk_right),
+            ("贴左边", "edge_left", lambda: self._play("edge_left", "扒住左侧边缘。")),
+            ("贴右边", "edge_right", lambda: self._play("edge_right", "扒住右侧边缘。")),
             ("跳跃", "jump", lambda: self._play("jump", "跳跃动作已触发。")),
             ("睡觉", "sleep", self._sleep),
             ("显示/隐藏桌宠", "toggle", self.toggle_pet),

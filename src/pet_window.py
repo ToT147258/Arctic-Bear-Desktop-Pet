@@ -21,6 +21,8 @@ ACTION_LABELS = {
     "sleep_prepare": "准备睡觉",
     "drag": "拖拽",
     "touch": "互动",
+    "edge_left": "贴左边",
+    "edge_right": "贴右边",
 }
 
 
@@ -98,6 +100,7 @@ class PolarBearPetWindow(QWidget):
         self._bubble_text = ""
         self._edge_snap_enabled = True
         self._edge_snap_threshold = 48
+        self._edge_stick_side = None
 
         self._fallback_source_pixmap = QPixmap(str(self.asset_root / "polar-bear-realistic.png"))
         self.fallback_pixmap = self._scale_pixmap(self._fallback_source_pixmap)
@@ -346,6 +349,8 @@ class PolarBearPetWindow(QWidget):
             "blink": "blink",
             "sleep": "sleep",
             "sleep_prepare": "sleep_prepare",
+            "edge_left": "edge_left",
+            "edge_right": "edge_right",
             "drag": "drag",
             "touch": "touch",
         }
@@ -663,7 +668,7 @@ class PolarBearPetWindow(QWidget):
             return
 
         for source_name, source_action in self._actions.items():
-            if source_name in {"idle", "blink", "sleep_prepare"} or not source_action.frames:
+            if source_name in {"idle", "blink", "sleep_prepare", "edge_left", "edge_right"} or not source_action.frames:
                 continue
             target_frame_index = self._idle_return_frame_hint(source_name) % len(idle.frames)
             frames = self._step_frames(idle.frames, target_frame_index, 7)
@@ -700,6 +705,13 @@ class PolarBearPetWindow(QWidget):
             return
         if self._is_dragging and action_name != "idle":
             return
+        was_edge_side = self._edge_stick_side
+        if action_name == "edge_left":
+            self._edge_stick_side = "left"
+        elif action_name == "edge_right":
+            self._edge_stick_side = "right"
+        else:
+            self._edge_stick_side = None
         if self._action_name in {"walk_left", "walk_right"} and action_name != self._action_name:
             self._commit_walk_visual_offset(force=True)
         if transition and action_name == "sleep" and "sleep_prepare" in self._actions:
@@ -719,9 +731,14 @@ class PolarBearPetWindow(QWidget):
         self._prime_action_timing(action_name, action)
         if hasattr(self, "_clock"):
             self._clock.restart()
+        if was_edge_side and action_name not in {"edge_left", "edge_right"}:
+            next_x, next_y = self.fit_position_to_visible_screen(self.x(), self.y())
+            if next_x != self.x() or next_y != self.y():
+                self.move(next_x, next_y)
         self.update()
 
     def _begin_drag_hold(self):
+        self._edge_stick_side = None
         self._commit_walk_visual_offset(force=True)
         frame = self._current_frame()
         self._drag_hold_frame = QPixmap(frame) if frame and not frame.isNull() else None
@@ -862,10 +879,12 @@ class PolarBearPetWindow(QWidget):
 
     def _snap_to_screen_edge(self):
         if not self._edge_snap_enabled:
-            return
+            self._edge_stick_side = None
+            return None
         area = self._available_screen_area()
         if not area:
-            return
+            self._edge_stick_side = None
+            return None
         threshold = max(8, int(self._edge_snap_threshold))
         margin = max(2, round(4 * self._scale))
         rect = self._visible_pet_screen_rect()
@@ -875,11 +894,14 @@ class PolarBearPetWindow(QWidget):
         area_bottom = area.top() + area.height()
         next_x = self.x()
         next_y = self.y()
+        snapped_side = None
 
         if rect.left() <= area_left + threshold:
             next_x += round(area_left + margin - rect.left())
+            snapped_side = "left"
         elif rect.right() >= area_right - threshold:
             next_x += round(area_right - margin - rect.right())
+            snapped_side = "right"
 
         if rect.top() <= area_top + threshold:
             next_y += round(area_top + margin - rect.top())
@@ -888,6 +910,35 @@ class PolarBearPetWindow(QWidget):
 
         if next_x != self.x() or next_y != self.y():
             self.move(next_x, next_y)
+        self._edge_stick_side = snapped_side
+        return snapped_side
+
+    def _edge_action_name(self, side):
+        if side == "left" and "edge_left" in self._actions:
+            return "edge_left"
+        if side == "right" and "edge_right" in self._actions:
+            return "edge_right"
+        return None
+
+    def stick_to_edge(self, side):
+        edge_action = self._edge_action_name(side)
+        if not edge_action:
+            return False
+        self.play_action(edge_action, transition=False)
+        area = self._available_screen_area()
+        if area:
+            margin = max(2, round(4 * self._scale))
+            rect = self._visible_pet_screen_rect()
+            next_x = self.x()
+            if side == "left":
+                next_x += round(area.left() + margin - rect.left())
+            else:
+                next_x += round(area.left() + area.width() - margin - rect.right())
+            next_x, next_y = self.fit_position_to_visible_screen(next_x, self.y(), margin=margin)
+            if next_x != self.x() or next_y != self.y():
+                self.move(next_x, next_y)
+        self._edge_stick_side = side
+        return True
 
     def _move_within_screen(self, dx, dy, turn_on_edge=True):
         area = self._available_screen_area()
@@ -935,8 +986,12 @@ class PolarBearPetWindow(QWidget):
                 self._is_dragging = False
                 self._click_action_token += 1
                 self._drag_hold_frame = None
-                self._snap_to_screen_edge()
-                self.play_action("idle", transition=False)
+                snapped_side = self._snap_to_screen_edge()
+                edge_action = self._edge_action_name(snapped_side)
+                if edge_action:
+                    self.stick_to_edge(snapped_side)
+                else:
+                    self.play_action("idle", transition=False)
                 self.interaction_requested.emit("drag_end")
             elif self._ignore_next_click_release:
                 self._ignore_next_click_release = False
@@ -983,7 +1038,7 @@ class PolarBearPetWindow(QWidget):
         menu.addSeparator()
 
         action_menu = menu.addMenu("动作")
-        for action_name in ("idle", "blink", "touch", "walk_left", "walk_right", "jump", "wave", "sleep"):
+        for action_name in ("idle", "blink", "touch", "walk_left", "walk_right", "edge_left", "edge_right", "jump", "wave", "sleep"):
             if action_name not in self._actions:
                 continue
             action = action_menu.addAction(ACTION_LABELS.get(action_name, action_name))
@@ -1029,7 +1084,12 @@ class PolarBearPetWindow(QWidget):
         menu.exec(event.globalPos())
 
     def _play_menu_action(self, action_name):
-        self.play_action(action_name)
+        if action_name == "edge_left":
+            self.stick_to_edge("left")
+        elif action_name == "edge_right":
+            self.stick_to_edge("right")
+        else:
+            self.play_action(action_name)
         self.interaction_requested.emit(action_name)
 
     def paintEvent(self, event):
@@ -1053,15 +1113,7 @@ class PolarBearPetWindow(QWidget):
 
         if not self._bubble_text:
             return
-        painter.setPen(QPen(QColor(126, 232, 255), max(1, round(2 * scale))))
-        painter.setBrush(QColor(12, 24, 38, 220))
-        header_rect = QRectF(content_left + round(48 * scale), round(10 * scale), self._content_width - round(96 * scale), max(24, round(34 * scale)))
-        painter.drawRoundedRect(header_rect, max(8, round(12 * scale)), max(8, round(12 * scale)))
-        painter.setPen(QColor(222, 248, 255))
-        painter.drawText(header_rect, Qt.AlignCenter, f"北极熊 · {self.mood} · {self.scale_percent}%")
-
-        if self._bubble_text:
-            self._draw_bubble(painter, content_left, header_rect)
+        self._draw_bubble(painter, content_left)
 
     def _current_frame(self):
         if self._is_dragging and self._drag_hold_frame and not self._drag_hold_frame.isNull():
@@ -1088,26 +1140,36 @@ class PolarBearPetWindow(QWidget):
             "请放入真实动画帧：assets/polar_bear/real_actions",
         )
 
-    def _draw_bubble(self, painter, content_left, header_rect):
+    def _draw_bubble(self, painter, content_left):
         scale = self._scale
         margin = max(6, round(12 * scale))
-        left_space = max(0, content_left)
-        right_space = max(0, self.width() - (content_left + self._content_width))
+        pet_rect = self._visible_pet_rect()
         preferred_width = max(150, round(240 * scale))
-        side_space = max(left_space, right_space)
-        bubble_width = min(preferred_width, max(0, side_space - margin * 2))
+        preferred_width = min(preferred_width, max(120, self.width() - margin * 2))
+        min_width = max(112, round(132 * scale))
+        left_space = max(0, pet_rect.left() - margin * 2)
+        right_space = max(0, self.width() - pet_rect.right() - margin * 2)
 
-        if bubble_width >= max(120, round(150 * scale)):
+        if self._edge_stick_side == "left" and right_space >= min_width:
+            bubble_width = min(preferred_width, right_space)
+            bubble_x = pet_rect.right() + margin
+        elif self._edge_stick_side == "right" and left_space >= min_width:
+            bubble_width = min(preferred_width, left_space)
+            bubble_x = pet_rect.left() - margin - bubble_width
+        elif max(left_space, right_space) >= min_width:
+            bubble_width = min(preferred_width, max(left_space, right_space))
             if left_space >= right_space:
-                bubble_x = max(margin, content_left - margin - bubble_width)
+                bubble_x = pet_rect.left() - margin - bubble_width
             else:
-                bubble_x = min(
-                    self.width() - bubble_width - margin,
-                    content_left + self._content_width + margin,
-                )
+                bubble_x = pet_rect.right() + margin
         else:
-            bubble_width = max(120, self._content_width - round(48 * scale))
+            bubble_width = min(
+                max(min_width, self._content_width - round(48 * scale)),
+                self.width() - margin * 2,
+            )
             bubble_x = content_left + (self._content_width - bubble_width) / 2
+
+        bubble_x = max(margin, min(self.width() - bubble_width - margin, bubble_x))
 
         text_margin = max(8, round(10 * scale))
         text_width = max(1, bubble_width - text_margin * 2)
@@ -1118,9 +1180,15 @@ class PolarBearPetWindow(QWidget):
         )
         bubble_height = max(max(38, round(48 * scale)), math.ceil(measured.height()) + text_margin * 2)
         bubble_height = min(bubble_height, max(76, round(96 * scale)))
-        top_y = header_rect.bottom() + max(8, round(12 * scale))
-        bottom_limit = self.height() - bubble_height - max(14, round(72 * scale))
-        bubble_y = max(max(4, round(8 * scale)), min(top_y, bottom_limit))
+        min_y = max(4, round(8 * scale))
+        max_y = self.height() - bubble_height - max(14, round(44 * scale))
+        if self._edge_stick_side in {"left", "right"}:
+            target_y = pet_rect.top() + round(18 * scale)
+        else:
+            target_y = pet_rect.top() - bubble_height - margin
+            if target_y < min_y:
+                target_y = pet_rect.bottom() + margin
+        bubble_y = max(min_y, min(target_y, max_y))
 
         bubble_rect = QRectF(
             bubble_x,
@@ -1128,6 +1196,17 @@ class PolarBearPetWindow(QWidget):
             bubble_width,
             bubble_height,
         )
+        if bubble_rect.intersects(pet_rect):
+            above_y = pet_rect.top() - bubble_height - margin
+            below_y = pet_rect.bottom() + margin
+            if above_y >= min_y:
+                bubble_y = above_y
+            elif below_y <= max_y:
+                bubble_y = below_y
+            else:
+                bubble_y = min_y
+            bubble_rect.moveTop(max(min_y, min(bubble_y, max_y)))
+
         painter.setPen(QPen(QColor(126, 232, 255), max(1, round(2 * scale))))
         painter.setBrush(QColor(12, 24, 38, 228))
         painter.drawRoundedRect(bubble_rect, max(8, round(12 * scale)), max(8, round(12 * scale)))

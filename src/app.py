@@ -847,6 +847,8 @@ class PolarBearPetApp(QMainWindow):
             ("睡觉", "sleep", "准备休息一下。", "rest"),
             ("左走", "walk_left", "向左走一小段。", "walk"),
             ("右走", "walk_right", "向右走一小段。", "walk"),
+            ("贴左边", "edge_left", "扒住左侧边缘。", None),
+            ("贴右边", "edge_right", "扒住右侧边缘。", None),
             ("跳跃", "jump", "跳跃动作已触发。", "jump"),
             ("互动反应", "touch", "摸摸头，心情变好啦。", "touch"),
         ]
@@ -1119,7 +1121,12 @@ class PolarBearPetApp(QMainWindow):
         if not self.pet_window.isVisible():
             self.pet_window.show()
         self.pet_window.raise_()
-        self.pet_window.play_action(action_name)
+        if action_name == "edge_left":
+            self.pet_window.stick_to_edge("left")
+        elif action_name == "edge_right":
+            self.pet_window.stick_to_edge("right")
+        else:
+            self.pet_window.play_action(action_name)
         if bubble and self.store.settings.get("bubble_on", True):
             self.pet_window.show_bubble(bubble)
         self.pet_window.update()
@@ -1145,6 +1152,9 @@ class PolarBearPetApp(QMainWindow):
         elif action_name in {"walk_left", "walk_right"}:
             self.store.walk()
             self._show_bubble("散步一小段。")
+        elif action_name in {"edge_left", "edge_right"}:
+            self.store.add_log("互动", "桌宠贴边吸附，切换到扒墙动作。")
+            self._show_bubble("贴边吸附成功。")
         elif action_name == "sleep":
             self.store.rest()
             self._show_bubble("准备休息一下。")
