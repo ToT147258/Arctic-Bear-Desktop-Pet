@@ -18,6 +18,9 @@ env/
 diagnostics/
 tmp_video_samples/
 data/save.json
+data/*.json
+data/*.png
+data/test-*.json
 tools/__pycache__/
 tools/_*.png
 tools/_*.jpg

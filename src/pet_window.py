@@ -76,6 +76,7 @@ class PolarBearPetWindow(QWidget):
         self._drag_position = QPoint()
         self._press_position = QPoint()
         self._is_dragging = False
+        self._drag_hold_frame = None
         self._click_action_token = 0
         self._ignore_next_click_release = False
         self._click_action_delay = 0
@@ -107,10 +108,12 @@ class PolarBearPetWindow(QWidget):
         self._timer = QTimer(self)
         self._timer.setTimerType(Qt.PreciseTimer)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(10)
+        self._timer.start(16)
 
     @property
     def mood(self):
+        if self._is_dragging:
+            return ACTION_LABELS.get("drag", "drag")
         action = self._current_action()
         if action:
             return action.label
@@ -193,7 +196,7 @@ class PolarBearPetWindow(QWidget):
         base_width, base_height = self._base_window_size
         self._content_width = round(base_width * self._scale)
         self._content_height = round(base_height * self._scale)
-        self._walk_visual_padding = max(180, round(260 * self._scale))
+        self._walk_visual_padding = max(120, round(220 * self._scale))
         self.setFixedSize(self._content_width + self._walk_visual_padding * 2, self._content_height)
         self._pet_draw_rect = QRectF(
             self._walk_visual_padding + round(self._base_draw_rect.x() * self._scale),
@@ -288,12 +291,24 @@ class PolarBearPetWindow(QWidget):
 
         act_conf = json.loads(act_conf_path.read_text(encoding="utf-8-sig"))
         actions = {}
+        frame_cache = {}
+        scaled_frame_cache = {}
         for action_name, action_conf in act_conf.items():
             image_prefix = action_conf.get("images", action_name)
-            source_frames = self._load_prefixed_frames(action_root, image_prefix)
+            if image_prefix not in frame_cache:
+                frame_cache[image_prefix] = self._load_prefixed_frames(action_root, image_prefix)
+            source_frames = frame_cache[image_prefix]
             if not source_frames:
                 continue
-            source_frames = source_frames * int(action_conf.get("act_num", 1))
+            act_num = int(action_conf.get("act_num", 1))
+            cache_key = (image_prefix, act_num)
+            if cache_key not in scaled_frame_cache:
+                repeated_source_frames = source_frames * act_num
+                scaled_frame_cache[cache_key] = (
+                    repeated_source_frames,
+                    self._scale_frames(repeated_source_frames),
+                )
+            repeated_source_frames, scaled_frames = scaled_frame_cache[cache_key]
             interval = int(float(action_conf.get("frame_refresh", 0.08)) * 1000)
             move_x = 0
             if action_conf.get("need_move"):
@@ -308,8 +323,8 @@ class PolarBearPetWindow(QWidget):
             actions[action_name] = FrameAction(
                 name=action_name,
                 label=ACTION_LABELS.get(action_name, action_name),
-                frames=self._scale_frames(source_frames),
-                source_frames=source_frames,
+                frames=list(scaled_frames),
+                source_frames=list(repeated_source_frames),
                 interval=interval,
                 loop=bool(action_conf.get("loop", action_name == "default")),
                 move_x=move_x,
@@ -343,7 +358,7 @@ class PolarBearPetWindow(QWidget):
     def _load_prefixed_frames(self, action_root, image_prefix):
         frame_pattern = re.compile(rf"^{re.escape(image_prefix)}_(\d+)\.png$", re.IGNORECASE)
         files = []
-        for file in action_root.iterdir():
+        for file in action_root.glob(f"{image_prefix}_*.png"):
             match = frame_pattern.match(file.name)
             if match:
                 files.append((int(match.group(1)), file))
@@ -443,12 +458,19 @@ class PolarBearPetWindow(QWidget):
         return random.randint(30000, 50000)
 
     def _tick(self):
-        action = self._current_action()
-        if not action:
-            self.update()
+        if not self.isVisible():
+            self._clock.restart()
+            return
+        if self._is_dragging:
+            self._clock.restart()
             return
 
-        delta_ms = min(80, max(1, self._clock.restart()))
+        action = self._current_action()
+        if not action or not action.frames:
+            self._clock.restart()
+            return
+
+        delta_ms = min(48, max(1, self._clock.restart()))
         self._elapsed += delta_ms
         should_update = False
 
@@ -623,6 +645,8 @@ class PolarBearPetWindow(QWidget):
         transition = self._return_transitions.get(source_action_name)
         if not transition:
             return False
+        if source_action_name in {"walk_left", "walk_right"}:
+            self._commit_walk_visual_offset(force=True)
         self._transition_action = transition
         self._action_name = "__transition__"
         self._frame_index = 1 if len(transition.frames) > 1 else 0
@@ -638,6 +662,10 @@ class PolarBearPetWindow(QWidget):
     def play_action(self, action_name, duration=None, transition=True, start_frame_index=0):
         if action_name not in self._actions:
             return
+        if self._is_dragging and action_name != "idle":
+            return
+        if self._action_name in {"walk_left", "walk_right"} and action_name != self._action_name:
+            self._commit_walk_visual_offset(force=True)
         if transition and action_name == "sleep" and "sleep_prepare" in self._actions:
             action_name = "sleep_prepare"
         if transition and action_name == "idle" and self._action_name not in {"idle", "__transition__"}:
@@ -653,6 +681,26 @@ class PolarBearPetWindow(QWidget):
         self._walk_frame_count = 0
         self._move_x_remainder = 0.0
         self._prime_action_timing(action_name, action)
+        if hasattr(self, "_clock"):
+            self._clock.restart()
+        self.update()
+
+    def _begin_drag_hold(self):
+        self._commit_walk_visual_offset(force=True)
+        frame = self._current_frame()
+        self._drag_hold_frame = QPixmap(frame) if frame and not frame.isNull() else None
+        self._transition_action = None
+        self._action_name = "idle"
+        idle = self._actions.get("idle")
+        if idle and idle.frames:
+            self._frame_index = self._idle_return_frame_hint("drag") % len(idle.frames)
+        else:
+            self._frame_index = 0
+        self._cycle_count = 0
+        self._walk_frame_count = 0
+        self._elapsed = 0
+        self._move_x_remainder = 0.0
+        self._walk_visual_offset_x = 0.0
         if hasattr(self, "_clock"):
             self._clock.restart()
         self.update()
@@ -732,6 +780,7 @@ class PolarBearPetWindow(QWidget):
             self._press_position = event.globalPosition().toPoint()
             self._drag_position = self._press_position - self.frameGeometry().topLeft()
             self._is_dragging = False
+            self._drag_hold_frame = None
             event.accept()
 
     def mouseMoveEvent(self, event):
@@ -743,7 +792,7 @@ class PolarBearPetWindow(QWidget):
                     return
                 self._is_dragging = True
                 self._click_action_token += 1
-                self.play_action("drag")
+                self._begin_drag_hold()
                 self.interaction_requested.emit("drag")
             self.move(current_position - self._drag_position)
             event.accept()
@@ -753,8 +802,9 @@ class PolarBearPetWindow(QWidget):
             if self._is_dragging:
                 self._is_dragging = False
                 self._click_action_token += 1
+                self._drag_hold_frame = None
                 self._snap_to_screen_edge()
-                self.play_action("idle")
+                self.play_action("idle", transition=False)
                 self.interaction_requested.emit("drag_end")
             elif self._ignore_next_click_release:
                 self._ignore_next_click_release = False
@@ -847,6 +897,8 @@ class PolarBearPetWindow(QWidget):
             self._draw_bubble(painter, content_left, header_rect)
 
     def _current_frame(self):
+        if self._is_dragging and self._drag_hold_frame and not self._drag_hold_frame.isNull():
+            return self._drag_hold_frame
         action = self._current_action()
         if not action or not action.frames:
             return None

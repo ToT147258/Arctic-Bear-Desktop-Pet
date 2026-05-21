@@ -20,6 +20,7 @@ class BackpackPage(QWidget):
         self.store = store
         self.play_action = play_action
         self.project_root = Path(__file__).resolve().parents[2]
+        self._pixmap_cache = {}
         self.coin_label = None
         self.count_labels = {}
         self.selected_item_id = None
@@ -39,7 +40,11 @@ class BackpackPage(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setObjectName("pageScroll")
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.viewport().setAutoFillBackground(False)
         content = QWidget()
+        content.setObjectName("backpackContent")
+        content.setAutoFillBackground(False)
         layout = QVBoxLayout(content)
         layout.setContentsMargins(34, 30, 34, 30)
         layout.setSpacing(16)
@@ -199,8 +204,18 @@ class BackpackPage(QWidget):
         image_path = self.project_root / item.get("image", "")
         if not image_path.exists():
             return QPixmap()
+        try:
+            mtime = image_path.stat().st_mtime_ns
+        except OSError:
+            mtime = 0
+        cache_key = (str(image_path), int(width), int(height), mtime)
+        cached = self._pixmap_cache.get(cache_key)
+        if cached is not None:
+            return cached
         pixmap = QPixmap(str(image_path))
-        return pixmap.scaled(width, height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        scaled = pixmap.scaled(width, height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self._pixmap_cache[cache_key] = scaled
+        return scaled
 
     def _format_effects(self, effects):
         names = {
@@ -236,7 +251,7 @@ class BackpackPage(QWidget):
 
     def _sync_showcase(self):
         item = ITEM_CATALOG[self.selected_item_id]
-        pixmap = self._item_pixmap(item, 292, 220)
+        pixmap = self._item_pixmap(item, 220, 166)
         if not pixmap.isNull():
             self.showcase_image.setPixmap(pixmap)
         self.showcase_name.setText(item["name"])
@@ -311,6 +326,12 @@ PAGE_STYLE = """
     background: transparent;
     border: none;
 }
+#pageScroll > QWidget {
+    background: transparent;
+}
+#backpackContent {
+    background: transparent;
+}
 #pageDescription, #taskItem {
     color: #5f7c8d;
     font-size: 14px;
@@ -327,10 +348,10 @@ PAGE_STYLE = """
     border-radius: 8px;
 }
 #showcaseImage {
-    min-width: 320px;
-    max-width: 320px;
-    min-height: 236px;
-    max-height: 236px;
+    min-width: 230px;
+    max-width: 240px;
+    min-height: 172px;
+    max-height: 178px;
     background: #f8fcff;
     border: 1px solid #c4e5ef;
     border-radius: 8px;

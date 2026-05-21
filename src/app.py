@@ -1,4 +1,5 @@
 import random
+from datetime import datetime
 from math import cos, pi, sin
 from pathlib import Path
 
@@ -16,6 +17,8 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QProgressBar,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QStackedWidget,
     QSystemTrayIcon,
     QVBoxLayout,
@@ -23,10 +26,10 @@ from PySide6.QtWidgets import (
 )
 
 from src.modules.backpack import BackpackPage
+from src.modules.chat import ChatPage
 from src.modules.interaction import InteractionPage
 from src.modules.notification import NotificationPage
 from src.modules.settings import SettingsPage
-from src.modules.status import StatusPage
 from src.pet_data import PetDataStore
 from src.pet_window import PolarBearPetWindow
 
@@ -38,14 +41,17 @@ class AnimatedDashboardRoot(QWidget):
         self._phase = 0.0
         self._flakes = [
             (rng.random(), rng.random(), rng.uniform(0.5, 1.7), rng.uniform(0.18, 0.7))
-            for _ in range(58)
+            for _ in range(34)
         ]
         self._timer = QTimer(self)
+        self._timer.setTimerType(Qt.CoarseTimer)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(33)
+        self._timer.start(90)
 
     def _tick(self):
-        self._phase = (self._phase + 0.012) % (pi * 2)
+        if not self.isVisible():
+            return
+        self._phase = (self._phase + 0.028) % (pi * 2)
         self.update()
 
     def paintEvent(self, event):
@@ -90,6 +96,8 @@ class MascotStage(QWidget):
         self.setObjectName("petStage")
         self._phase = 0.0
         self._pixmap = QPixmap()
+        self._scaled_pixmap = QPixmap()
+        self._scaled_size = QSize()
         for path in (
             asset_root / "polar-bear-flat-lively.png",
             asset_root / "polar-bear-premium.png",
@@ -101,15 +109,33 @@ class MascotStage(QWidget):
                     self._pixmap = pixmap
                     break
         self._timer = QTimer(self)
+        self._timer.setTimerType(Qt.CoarseTimer)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(33)
+        self._timer.start(80)
 
     def sizeHint(self):
         return QSize(232, 268)
 
+    def minimumSizeHint(self):
+        return QSize(140, 220)
+
     def _tick(self):
-        self._phase = (self._phase + 0.035) % (pi * 2)
+        if not self.isVisible():
+            return
+        self._phase = (self._phase + 0.056) % (pi * 2)
         self.update()
+
+    def _scaled_bear(self, target_size):
+        if self._pixmap.isNull() or target_size.isEmpty():
+            return QPixmap()
+        if self._scaled_pixmap.isNull() or self._scaled_size != target_size:
+            self._scaled_pixmap = self._pixmap.scaled(
+                target_size,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+            self._scaled_size = QSize(target_size)
+        return self._scaled_pixmap
 
     def paintEvent(self, event):
         super().paintEvent(event)
@@ -137,13 +163,9 @@ class MascotStage(QWidget):
         painter.drawText(QRectF(rect.left(), rect.top() + 12, rect.width(), 22), Qt.AlignCenter, "小熊在线")
 
         if not self._pixmap.isNull():
-            bob = sin(self._phase) * 8
+            bob = sin(self._phase) * 6
             target = QRectF(rect.center().x() - 82, rect.top() + 54 + bob, 164, 176)
-            scaled = self._pixmap.scaled(
-                target.size().toSize(),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation,
-            )
+            scaled = self._scaled_bear(target.size().toSize())
             image_rect = QRectF(
                 rect.center().x() - scaled.width() / 2,
                 target.top() + (target.height() - scaled.height()) / 2,
@@ -160,6 +182,102 @@ class MascotStage(QWidget):
         painter.drawText(QRectF(rect.left(), rect.bottom() - 32, rect.width(), 20), Qt.AlignCenter, "陪伴值实时同步")
 
 
+class SidebarMascotCard(QWidget):
+    def __init__(self, asset_root):
+        super().__init__()
+        self.setObjectName("sidebarMascotCard")
+        self._phase = 0.0
+        self._pixmap = QPixmap()
+        self._scaled_pixmap = QPixmap()
+        self._scaled_size = QSize()
+        for path in (
+            asset_root / "polar-bear-flat-lively.png",
+            asset_root / "polar-bear-premium.png",
+            asset_root / "polar-bear-realistic.png",
+        ):
+            if path.exists():
+                pixmap = QPixmap(str(path))
+                if not pixmap.isNull():
+                    self._pixmap = pixmap
+                    break
+        self._timer = QTimer(self)
+        self._timer.setTimerType(Qt.CoarseTimer)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(90)
+
+    def sizeHint(self):
+        return QSize(202, 136)
+
+    def _tick(self):
+        if not self.isVisible():
+            return
+        self._phase = (self._phase + 0.058) % (pi * 2)
+        self.update()
+
+    def _scaled_bear(self, target_size):
+        if self._pixmap.isNull() or target_size.isEmpty():
+            return QPixmap()
+        if self._scaled_pixmap.isNull() or self._scaled_size != target_size:
+            self._scaled_pixmap = self._pixmap.scaled(
+                target_size,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+            self._scaled_size = QSize(target_size)
+        return self._scaled_pixmap
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+
+        bg = QLinearGradient(rect.topLeft(), rect.bottomRight())
+        bg.setColorAt(0.0, QColor("#ffffff"))
+        bg.setColorAt(0.56, QColor("#e9fbff"))
+        bg.setColorAt(1.0, QColor("#fff1f7"))
+        painter.setBrush(bg)
+        painter.setPen(QPen(QColor("#a7def0"), 1.2))
+        painter.drawRoundedRect(rect, 8, 8)
+
+        painter.setPen(QPen(QColor(100, 201, 232, 90), 3, Qt.SolidLine, Qt.RoundCap))
+        wave = QPainterPath()
+        base_y = rect.top() + 36 + sin(self._phase) * 4
+        wave.moveTo(rect.left() + 12, base_y)
+        wave.cubicTo(rect.left() + 48, base_y - 18, rect.left() + 78, base_y + 18, rect.left() + 114, base_y)
+        painter.drawPath(wave)
+
+        painter.setPen(QColor("#4db7d0"))
+        painter.setFont(QFont("Microsoft YaHei UI", 9, QFont.Black))
+        painter.drawText(QRectF(rect.left() + 14, rect.top() + 16, 94, 18), Qt.AlignLeft | Qt.AlignVCenter, "ARCTIC HUB")
+        painter.setPen(QColor("#ff8ebc"))
+        painter.setFont(QFont("Microsoft YaHei UI", 12, QFont.Black))
+        painter.drawText(QRectF(rect.left() + 14, rect.top() + 42, 98, 26), Qt.AlignLeft | Qt.AlignVCenter, "暖暖陪伴")
+        painter.setPen(QColor("#66899b"))
+        painter.setFont(QFont("Microsoft YaHei UI", 8, QFont.DemiBold))
+        painter.drawText(QRectF(rect.left() + 14, rect.top() + 74, 96, 32), Qt.AlignLeft | Qt.TextWordWrap, "状态、动作、提醒一屏掌握")
+
+        painter.setBrush(QColor(92, 142, 170, 38))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(QRectF(rect.right() - 92, rect.bottom() - 24, 64, 11))
+        if not self._pixmap.isNull():
+            bob = sin(self._phase) * 4
+            target = QRectF(rect.right() - 100, rect.top() + 25 + bob, 74, 88)
+            scaled = self._scaled_bear(target.size().toSize())
+            image_rect = QRectF(
+                target.center().x() - scaled.width() / 2,
+                target.center().y() - scaled.height() / 2,
+                scaled.width(),
+                scaled.height(),
+            )
+            painter.drawPixmap(image_rect.toRect(), scaled)
+
+        painter.setPen(QPen(QColor(255, 255, 255, 190), 1.8))
+        for x, y, size in ((24, 112, 5), (146, 18, 4), (177, 106, 5)):
+            painter.drawLine(QPointF(rect.left() + x - size, rect.top() + y), QPointF(rect.left() + x + size, rect.top() + y))
+            painter.drawLine(QPointF(rect.left() + x, rect.top() + y - size), QPointF(rect.left() + x, rect.top() + y + size))
+
+
 class CareIndexDial(QWidget):
     def __init__(self):
         super().__init__()
@@ -170,21 +288,35 @@ class CareIndexDial(QWidget):
         self._note = ""
         self._phase = 0.0
         self._timer = QTimer(self)
+        self._timer.setTimerType(Qt.CoarseTimer)
+        self._timer.setInterval(80)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(33)
 
     def sizeHint(self):
         return QSize(226, 226)
+
+    def minimumSizeHint(self):
+        return QSize(150, 210)
 
     def set_data(self, value, caption, note):
         self._target = max(0, min(100, int(value)))
         self._caption = caption
         self._note = note
+        if abs(self._target - self._display) > 0.15 and not self._timer.isActive():
+            self._timer.start()
         self.update()
 
     def _tick(self):
-        self._phase = (self._phase + 0.035) % (pi * 2)
-        self._display += (self._target - self._display) * 0.12
+        if not self.isVisible():
+            self._display = float(self._target)
+            self._timer.stop()
+            return
+        diff = self._target - self._display
+        if abs(diff) <= 0.15:
+            self._display = float(self._target)
+            self._timer.stop()
+        else:
+            self._display += diff * 0.24
         self.update()
 
     def paintEvent(self, event):
@@ -231,6 +363,7 @@ class PolarBearPetApp(QMainWindow):
             app.setFont(QFont("Microsoft YaHei UI", 10))
         self.setWindowTitle("北极熊桌面宠物系统")
         self.resize(1180, 760)
+        self.setMinimumSize(760, 560)
         self.store = PetDataStore()
         self.pet_window = PolarBearPetWindow()
         self.pet_window.setWindowOpacity(float(self.store.settings.get("opacity", 1.0)))
@@ -250,6 +383,19 @@ class PolarBearPetApp(QMainWindow):
         self.care_index_label = None
         self.signal_caption_label = None
         self.economy_summary_label = None
+        self.current_action_label = None
+        self.today_reminder_label = None
+        self.online_status_label = None
+        self.top_time_label = None
+        self.clock_label = None
+        self.course_title_label = None
+        self.course_time_label = None
+        self.course_location_label = None
+        self.course_message_label = None
+        self._sidebar_scroll = None
+        self._overview_page = None
+        self._right_panel = None
+        self._pet_stage = None
         self.recent_log_labels = []
         self.tray_icon = None
         self.care_dial = None
@@ -272,9 +418,13 @@ class PolarBearPetApp(QMainWindow):
         self._focus_timer.setTimerType(Qt.PreciseTimer)
         self._focus_timer.timeout.connect(self._tick_focus_session)
         self._focus_timer.start(1000)
+        self._clock_timer = QTimer(self)
+        self._clock_timer.timeout.connect(self._update_clock_labels)
+        self._clock_timer.start(1000)
         self.store.changed.connect(self._refresh_overview)
         self._show_tick_messages(self.store.tick())
         self._refresh_overview()
+        self._update_clock_labels()
 
     def _build_ui(self):
         root = AnimatedDashboardRoot()
@@ -284,14 +434,23 @@ class PolarBearPetApp(QMainWindow):
         layout.setSpacing(0)
 
         sidebar = self._build_sidebar()
+        sidebar_scroll = QScrollArea()
+        sidebar_scroll.setObjectName("sidebarScroll")
+        sidebar_scroll.setWidgetResizable(True)
+        sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        sidebar_scroll.setFrameShape(QFrame.NoFrame)
+        sidebar_scroll.setWidget(sidebar)
+        self._sidebar_scroll = sidebar_scroll
         self.stack = QStackedWidget()
+        self.stack.setMinimumSize(0, 0)
+        self.stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         pages = [
-            ("总览工作台", self._build_overview_page()),
-            ("桌宠交互", InteractionPage(self.pet_window, self.store, self._play_pet_action, self.toggle_pet_window)),
-            ("状态成长", StatusPage(self.store, self._play_pet_action)),
-            ("背包喂养", BackpackPage(self.store, self._play_pet_action)),
-            ("系统设置", SettingsPage(self.store, self.pet_window)),
-            ("通知日志", NotificationPage(self.store, self.pet_window)),
+            ("宠物状态", self._build_overview_page()),
+            ("课程提醒", self._scroll_module_page(NotificationPage(self.store, self.pet_window))),
+            ("动作管理", self._scroll_module_page(InteractionPage(self.pet_window, self.store, self._play_pet_action, self.toggle_pet_window))),
+            ("聊天互动", self._scroll_module_page(ChatPage(self.store, self.pet_window, self._play_pet_action))),
+            ("外观装扮", BackpackPage(self.store, self._play_pet_action)),
+            ("系统设置", self._scroll_module_page(SettingsPage(self.store, self.pet_window))),
         ]
 
         for index, (name, page) in enumerate(pages):
@@ -304,12 +463,26 @@ class PolarBearPetApp(QMainWindow):
             self.stack.addWidget(page)
 
         sidebar.layout().addStretch()
-        layout.addWidget(sidebar, 0)
+        layout.addWidget(sidebar_scroll, 0)
         layout.addWidget(self.stack, 1)
         self.setCentralWidget(root)
         self.setStyleSheet(APP_STYLE)
         self._switch_page(0)
         self._start_panel_animations()
+        self._sync_responsive_layout()
+
+    def _scroll_module_page(self, page):
+        scroll = QScrollArea()
+        scroll.setObjectName("modulePageScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setMinimumSize(0, 0)
+        scroll.viewport().setAutoFillBackground(False)
+        page.setAutoFillBackground(False)
+        page.setProperty("moduleScrollContent", True)
+        page.setMinimumHeight(page.minimumSizeHint().height())
+        scroll.setWidget(page)
+        return scroll
 
     def _build_sidebar(self):
         sidebar = QWidget()
@@ -328,6 +501,10 @@ class PolarBearPetApp(QMainWindow):
         sidebar_layout.addWidget(subtitle)
         sidebar_layout.addWidget(status)
 
+        mascot = SidebarMascotCard(Path(__file__).resolve().parents[1] / "assets" / "polar_bear")
+        sidebar_layout.addWidget(mascot)
+        self._apply_soft_shadow(mascot, 22, 0, 7, QColor(100, 201, 232, 42))
+
         pet_button = QPushButton("显示 / 隐藏桌宠")
         pet_button.setCursor(Qt.PointingHandCursor)
         pet_button.setObjectName("petToggleButton")
@@ -336,41 +513,85 @@ class PolarBearPetApp(QMainWindow):
         return sidebar
 
     def _build_overview_page(self):
+        scroll = QScrollArea()
+        scroll.setObjectName("overviewScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setMinimumSize(0, 0)
+
         page = QWidget()
         page.setObjectName("overviewPage")
+        self._overview_page = page
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(32, 28, 32, 28)
-        layout.setSpacing(16)
+        layout.setContentsMargins(22, 20, 22, 20)
+        layout.setSpacing(14)
+
+        top_bar = QFrame()
+        top_bar.setObjectName("topTitleBar")
+        top_layout = QHBoxLayout(top_bar)
+        top_layout.setContentsMargins(22, 14, 18, 14)
+        top_layout.setSpacing(12)
+        title_block = QVBoxLayout()
+        title_block.setSpacing(2)
+        title = QLabel("北极熊桌宠控制面板")
+        title.setObjectName("mainTitle")
+        subtitle = QLabel("Dreamy Arctic Pet Hub · 可爱桌宠管理中心")
+        subtitle.setObjectName("mainSubtitle")
+        subtitle.setWordWrap(True)
+        subtitle.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        title_block.addWidget(title)
+        title_block.addWidget(subtitle)
+        self.top_time_label = QLabel()
+        self.top_time_label.setObjectName("topTime")
+        self.top_time_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        top_layout.addLayout(title_block, 1)
+        top_layout.addWidget(self.top_time_label, 0)
+        layout.addWidget(top_bar)
+        self._apply_soft_shadow(top_bar, 26, 0, 8, QColor(100, 201, 232, 42))
+
+        dashboard = QHBoxLayout()
+        dashboard.setSpacing(14)
+
+        main_column = QVBoxLayout()
+        main_column.setSpacing(14)
 
         hero = QFrame()
         hero.setObjectName("heroPanel")
         hero_layout = QHBoxLayout(hero)
-        hero_layout.setContentsMargins(28, 24, 28, 24)
-        hero_layout.setSpacing(20)
+        hero_layout.setContentsMargins(24, 20, 24, 20)
+        hero_layout.setSpacing(18)
 
         hero_text = QVBoxLayout()
-        eyebrow = QLabel("POLAR COMPANION")
+        eyebrow = QLabel("POLAR COMPANION CENTER")
         eyebrow.setObjectName("eyebrow")
-        title = QLabel("北极熊桌宠控制台")
-        title.setObjectName("heroTitle")
-        desc = QLabel("困难养成曲线已开启：金币更稀缺，好感需要稳定陪伴推进。这里会实时监测桌宠状态、资源压力和今日任务。")
+        hero_title = QLabel("和小熊一起管理今天")
+        hero_title.setObjectName("heroTitle")
+        hero_title.setWordWrap(True)
+        hero_title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        desc = QLabel("明亮通透的冰雪童话控制中心，集中查看状态、课程提醒、动作触发和桌宠日志。")
         desc.setWordWrap(True)
         desc.setObjectName("heroDesc")
+        desc.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         hero_text.addWidget(eyebrow)
-        hero_text.addWidget(title)
+        hero_text.addWidget(hero_title)
         hero_text.addWidget(desc)
         self.hero_status_label = QLabel()
         self.hero_status_label.setObjectName("heroStatus")
+        self.hero_status_label.setWordWrap(True)
+        self.hero_status_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         hero_text.addWidget(self.hero_status_label)
 
         pet_stage = MascotStage(Path(__file__).resolve().parents[1] / "assets" / "polar_bear")
+        self._pet_stage = pet_stage
 
         actions = QVBoxLayout()
         actions.setSpacing(10)
         show_pet = QPushButton("唤出桌宠")
         show_pet.clicked.connect(self.toggle_pet_window)
         show_pet.setObjectName("primaryAction")
-        interact = QPushButton("触发互动")
+        interact = QPushButton("互动反应")
         interact.setObjectName("heroAction")
         interact.clicked.connect(self._trigger_pet_interaction)
         focus = QPushButton("开始专注")
@@ -391,22 +612,124 @@ class PolarBearPetApp(QMainWindow):
         hero_layout.addLayout(hero_text, 1)
         hero_layout.addWidget(pet_stage, 0)
         hero_layout.addLayout(hero_side, 0)
-        layout.addWidget(hero)
+        main_column.addWidget(hero)
+        self._apply_soft_shadow(hero, 30, 0, 10, QColor(255, 173, 200, 52))
 
         metrics = QGridLayout()
-        metrics.setSpacing(14)
+        metrics.setSpacing(12)
         metric_data = [
-            ("hunger", "饱食度", "0%", "投喂食物可恢复", 0),
-            ("mood", "心情值", "0%", "互动收益已按次数递减", 0),
-            ("energy", "体力值", "0%", "睡觉和短休可恢复", 0),
-            ("affection", "好感度", "0%", "稀缺成长，阶段突破奖励更少", 0),
+            ("mood", "心情值", "0%", "轻触互动可提升心情", 0),
+            ("hunger", "饱食度", "0%", "投喂小鱼和牛奶恢复", 0),
+            ("energy", "活跃度", "0%", "睡觉和短休可恢复", 0),
         ]
         for index, item in enumerate(metric_data):
-            metrics.addWidget(self._metric_card(*item), index // 4, index % 4)
-        layout.addLayout(metrics)
+            metrics.addWidget(self._metric_card(*item), index // 3, index % 3)
+        self.current_action_label = QLabel("待机 · 眨眼微动")
+        metrics.addWidget(
+            self._mini_status_card("当前动作", self.current_action_label, "动作系统待命中", "action"),
+            1,
+            1,
+        )
+        self.today_reminder_label = QLabel("今日提醒 · 待检查")
+        metrics.addWidget(
+            self._mini_status_card("今日提醒", self.today_reminder_label, "课程和通知会同步显示", "reminder"),
+            1,
+            2,
+        )
+        self.online_status_label = QLabel("在线 · 运行稳定")
+        metrics.addWidget(
+            self._mini_status_card("桌宠连接", self.online_status_label, "窗口与控制台已连接", "online"),
+            1,
+            0,
+        )
+        main_column.addLayout(metrics)
 
-        content = QHBoxLayout()
-        content.setSpacing(16)
+        action_panel = QFrame()
+        action_panel.setObjectName("actionDock")
+        action_layout = QVBoxLayout(action_panel)
+        action_layout.setContentsMargins(18, 14, 18, 16)
+        action_layout.setSpacing(12)
+        action_title = QLabel("动作控制")
+        action_title.setObjectName("sectionHeading")
+        action_grid = QGridLayout()
+        action_grid.setSpacing(10)
+        action_items = [
+            ("挥手", "wave", "挥手动作已触发。", None),
+            ("睡觉", "sleep", "准备休息一下。", "rest"),
+            ("左走", "walk_left", "向左走一小段。", "walk"),
+            ("右走", "walk_right", "向右走一小段。", "walk"),
+            ("跳跃", "jump", "跳跃动作已触发。", "jump"),
+            ("互动反应", "touch", "摸摸头，心情变好啦。", "touch"),
+        ]
+        for index, (label, action_name, bubble, update) in enumerate(action_items):
+            button = QPushButton(label)
+            button.setObjectName("actionPillButton")
+            button.setCursor(Qt.PointingHandCursor)
+            button.clicked.connect(lambda checked=False, a=action_name, b=bubble, u=update: self._run_dashboard_action(a, b, u))
+            action_grid.addWidget(button, index // 3, index % 3)
+        action_layout.addWidget(action_title)
+        action_layout.addLayout(action_grid)
+        main_column.addWidget(action_panel)
+        self._apply_soft_shadow(action_panel, 22, 0, 8, QColor(100, 201, 232, 38))
+
+        dashboard.addLayout(main_column, 1)
+
+        right_panel = QFrame()
+        right_panel.setObjectName("rightReminderPanel")
+        self._right_panel = right_panel
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(18, 18, 18, 18)
+        right_layout.setSpacing(12)
+        right_title = QLabel("今日提醒")
+        right_title.setObjectName("rightPanelTitle")
+        right_layout.addWidget(right_title)
+        self.course_title_label = QLabel("暂无课程数据 · 可在提醒模块中添加")
+        self.course_time_label = QLabel("下一节课时间待同步")
+        self.course_location_label = QLabel("地点未设置 · 点击课程提醒维护")
+        self.course_message_label = QLabel("桌宠会用气泡提醒重要事项")
+        right_layout.addWidget(self._reminder_block("今日课程", self.course_title_label, "课程提醒"))
+        right_layout.addWidget(self._reminder_block("上课时间", self.course_time_label, "时间提醒"))
+        right_layout.addWidget(self._reminder_block("地点提醒", self.course_location_label, "位置"))
+        right_layout.addWidget(self._reminder_block("消息通知", self.course_message_label, "通知"))
+        log_title = QLabel("桌宠互动日志")
+        log_title.setObjectName("rightPanelTitle")
+        right_layout.addWidget(log_title)
+        for _ in range(4):
+            label = QLabel()
+            label.setObjectName("logBubble")
+            label.setWordWrap(True)
+            self.recent_log_labels.append(label)
+            right_layout.addWidget(label)
+        right_layout.addStretch()
+        dashboard.addWidget(right_panel, 0)
+        self._apply_soft_shadow(right_panel, 28, 0, 10, QColor(100, 201, 232, 42))
+
+        layout.addLayout(dashboard, 1)
+
+        footer = QFrame()
+        footer.setObjectName("statusFooter")
+        footer_layout = QHBoxLayout(footer)
+        footer_layout.setContentsMargins(16, 8, 16, 8)
+        footer_layout.setSpacing(18)
+        self.clock_label = QLabel()
+        self.clock_label.setObjectName("footerText")
+        connection = QLabel("连接状态 · 已连接")
+        connection.setObjectName("footerText")
+        connection.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        runtime = QLabel("桌宠运行状态 · 正常运行")
+        runtime.setObjectName("footerText")
+        runtime.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        render = QLabel("动画背景 · 开启")
+        render.setObjectName("footerText")
+        render.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        footer_layout.addWidget(self.clock_label)
+        footer_layout.addStretch()
+        footer_layout.addWidget(connection)
+        footer_layout.addWidget(runtime)
+        footer_layout.addWidget(render)
+        layout.addWidget(footer)
+        self._apply_soft_shadow(footer, 18, 0, 5, QColor(255, 173, 200, 34))
+
         self.today_summary_label = QLabel()
         self.today_summary_label.setObjectName("panelText")
         self.today_summary_label.setWordWrap(True)
@@ -416,34 +739,40 @@ class PolarBearPetApp(QMainWindow):
         self.growth_summary_label = QLabel()
         self.growth_summary_label.setObjectName("panelText")
         self.growth_summary_label.setWordWrap(True)
-        content.addWidget(self._info_panel("今日概况", [
-            self.today_summary_label,
-            self.growth_summary_label,
-            self.focus_summary_label,
-            "状态、任务、背包和专注记录会自动保存",
-        ]), 1)
-        content.addWidget(self._info_panel("困难养成策略", [
-            "每日任务金币下调，商店价格上调",
-            "连续摸摸只保留少量早期好感收益",
-            "好感突破和升级奖励改为长期目标",
-        ]), 1)
-        recent_panel = QFrame()
-        recent_panel.setObjectName("infoPanel")
-        recent_layout = QVBoxLayout(recent_panel)
-        recent_heading = QLabel("最近日志")
-        recent_heading.setObjectName("panelTitle")
-        recent_layout.addWidget(recent_heading)
-        for _ in range(4):
-            label = QLabel()
-            label.setObjectName("panelText")
-            label.setWordWrap(True)
-            self.recent_log_labels.append(label)
-            recent_layout.addWidget(label)
-        recent_layout.addStretch()
-        content.addWidget(recent_panel, 1)
-        layout.addLayout(content)
-        layout.addStretch()
-        return page
+        scroll.setWidget(page)
+        return scroll
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._sync_responsive_layout()
+
+    def _sync_responsive_layout(self):
+        if not getattr(self, "_sidebar_scroll", None):
+            return
+        width = self.width()
+        compact = width < 980
+        tiny = width < 840
+
+        sidebar_width = 224 if compact else 238
+        self._sidebar_scroll.setFixedWidth(sidebar_width)
+
+        if self._right_panel:
+            self._right_panel.setVisible(not compact)
+        if self._pet_stage:
+            self._pet_stage.setVisible(not tiny)
+        if self.care_dial:
+            self.care_dial.setVisible(width >= 880)
+        if self.top_time_label:
+            self.top_time_label.setVisible(not tiny)
+        if self._overview_page:
+            self._overview_page.setMinimumWidth(0 if compact else 860)
+
+    def _apply_soft_shadow(self, widget, blur, offset_x, offset_y, color):
+        effect = QGraphicsDropShadowEffect(widget)
+        effect.setBlurRadius(blur)
+        effect.setOffset(offset_x, offset_y)
+        effect.setColor(color)
+        widget.setGraphicsEffect(effect)
 
     def _metric_card(self, key, name, value, note, progress):
         card = QFrame()
@@ -470,6 +799,70 @@ class PolarBearPetApp(QMainWindow):
         layout.addWidget(bar)
         layout.addWidget(desc)
         return card
+
+    def _mini_status_card(self, title, value_label, note, tone):
+        card = QFrame()
+        card.setObjectName("miniStatusCard")
+        card.setProperty("tone", tone)
+        layout = QVBoxLayout(card)
+        layout.setSpacing(8)
+        heading = QLabel(title)
+        heading.setObjectName("metricName")
+        value_label.setObjectName("miniStatusValue")
+        value_label.setWordWrap(True)
+        desc = QLabel(note)
+        desc.setObjectName("metricNote")
+        desc.setWordWrap(True)
+        layout.addWidget(heading)
+        layout.addWidget(value_label)
+        layout.addWidget(desc)
+        return card
+
+    def _reminder_block(self, title, text, tag):
+        block = QFrame()
+        block.setObjectName("reminderBlock")
+        layout = QVBoxLayout(block)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(4)
+        row = QHBoxLayout()
+        title_label = QLabel(title)
+        title_label.setObjectName("reminderTitle")
+        tag_label = QLabel(tag)
+        tag_label.setObjectName("reminderTag")
+        row.addWidget(title_label, 1)
+        row.addWidget(tag_label, 0)
+        body = text if isinstance(text, QLabel) else QLabel(text)
+        body.setObjectName("reminderText")
+        body.setWordWrap(True)
+        layout.addLayout(row)
+        layout.addWidget(body)
+        return block
+
+    def _run_dashboard_action(self, action_name, bubble, update=None):
+        if update == "walk":
+            self.store.walk()
+        elif update == "rest":
+            self.store.rest()
+        elif update == "touch":
+            self.store.touch()
+            self._register_touch_burst()
+        elif update == "jump":
+            self.store.adjust_stats({"mood": 4, "energy": -2})
+            self.store.add_log("互动", "从控制面板触发跳跃动作。")
+        elif action_name == "wave":
+            self.store.add_log("互动", "从控制面板触发挥手动作。")
+        if self.current_action_label:
+            self.current_action_label.setText(f"{bubble.replace('。', '')}")
+        self._play_pet_action(action_name, bubble)
+
+    def _update_clock_labels(self):
+        now = datetime.now()
+        top_text = now.strftime("%m月%d日  %H:%M")
+        footer_text = now.strftime("当前时间 · %Y-%m-%d %H:%M:%S")
+        if self.top_time_label:
+            self.top_time_label.setText(top_text)
+        if self.clock_label:
+            self.clock_label.setText(footer_text)
 
     def _start_panel_animations(self):
         self._glow_targets.clear()
@@ -507,7 +900,7 @@ class PolarBearPetApp(QMainWindow):
     def _switch_page(self, index):
         self.stack.setCurrentIndex(index)
         page = self.stack.currentWidget()
-        if page and self._did_initial_page_show:
+        if page and self._did_initial_page_show and not isinstance(page, QScrollArea):
             effect = QGraphicsOpacityEffect(page)
             effect.setOpacity(0.0)
             page.setGraphicsEffect(effect)
@@ -518,6 +911,9 @@ class PolarBearPetApp(QMainWindow):
             self._page_transition.setEasingCurve(QEasingCurve.OutCubic)
             self._page_transition.start()
         elif page:
+            page.setGraphicsEffect(None)
+            self._did_initial_page_show = True
+        if page and isinstance(page, QScrollArea):
             page.setGraphicsEffect(None)
             self._did_initial_page_show = True
         for i, button in enumerate(self.nav_buttons):
@@ -691,6 +1087,19 @@ class PolarBearPetApp(QMainWindow):
         dial_note = f"金币 {stats.get('coins', 0)} / 好感 {affection['value']}% / 任务 {done}/{total}"
         if self.care_dial:
             self.care_dial.set_data(care_index, dial_caption, dial_note)
+        course_title, course_time, course_location = self.store.course_summary()
+        if self.today_reminder_label:
+            self.today_reminder_label.setText(f"{course_time} · {course_title}")
+        if self.course_title_label:
+            self.course_title_label.setText(course_title)
+        if self.course_time_label:
+            self.course_time_label.setText(course_time)
+        if self.course_location_label:
+            self.course_location_label.setText(course_location)
+        if self.course_message_label:
+            self.course_message_label.setText(f"今日任务 {done}/{total} · 课程提醒会同步到桌宠气泡")
+        if self.online_status_label:
+            self.online_status_label.setText("在线 · 运行稳定")
         if self.care_index_label:
             self.care_index_label.setText(str(care_index))
         if self.signal_caption_label:
@@ -727,9 +1136,8 @@ class PolarBearPetApp(QMainWindow):
 
     def showEvent(self, event):
         super().showEvent(event)
-        if not self.pet_window.isVisible():
+        if self.pet_window.isVisible():
             self.pet_window.move(self.x() + self.width() - self.pet_window.width() - 24, self.y() + 100)
-            self.pet_window.show()
 
     def closeEvent(self, event):
         self.store.save()
@@ -751,15 +1159,66 @@ APP_STYLE = """
 QMainWindow {
     background: #f5fbff;
 }
-#overviewPage {
+QScrollArea#overviewScroll {
+    background: transparent;
+    border: 0;
+}
+QScrollArea#overviewScroll > QWidget {
     background: transparent;
 }
-#sidebar {
-    min-width: 238px;
+QScrollArea#modulePageScroll {
+    background: transparent;
+    border: 0;
+}
+QScrollArea#modulePageScroll > QWidget {
+    background: transparent;
+}
+QWidget[moduleScrollContent="true"] {
+    background: transparent;
+}
+QScrollArea#sidebarScroll {
+    min-width: 220px;
     max-width: 238px;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 rgba(255, 255, 255, 226), stop:0.58 rgba(239, 249, 255, 218), stop:1 rgba(255, 246, 250, 218));
+    border: 0;
     border-right: 1px solid rgba(120, 190, 214, 150);
+}
+QScrollArea#sidebarScroll > QWidget {
+    background: transparent;
+}
+#overviewPage {
+    background: transparent;
+}
+#topTitleBar, #actionDock, #rightReminderPanel, #statusFooter {
+    background: rgba(255, 255, 255, 210);
+    border: 1px solid rgba(160, 220, 238, 180);
+    border-radius: 8px;
+}
+#mainTitle {
+    color: #244f66;
+    font-size: 26px;
+    font-weight: 900;
+}
+#mainSubtitle {
+    color: #6a8da0;
+    font-size: 13px;
+    font-weight: 800;
+}
+#topTime {
+    min-width: 126px;
+    color: #ffffff;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #64c9e8, stop:1 #ffadc8);
+    border: 1px solid rgba(255, 255, 255, 210);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-weight: 900;
+}
+#sidebar {
+    min-width: 198px;
+    max-width: 238px;
+    background: transparent;
 }
 #brandTitle {
     color: #25546b;
@@ -783,6 +1242,10 @@ QMainWindow {
     margin-bottom: 12px;
     font-weight: 800;
 }
+#sidebarMascotCard {
+    min-height: 136px;
+    max-height: 136px;
+}
 QPushButton {
     min-height: 40px;
     color: #416074;
@@ -799,12 +1262,39 @@ QPushButton:hover {
     background: #ffffff;
     border-color: #80cfe6;
 }
+QPushButton[nav="true"] {
+    min-height: 42px;
+    color: #426277;
+    background: rgba(255, 255, 255, 185);
+    border: 1px solid rgba(172, 222, 238, 205);
+    border-left: 4px solid rgba(100, 201, 232, 140);
+    border-radius: 8px;
+    text-align: left;
+    padding-left: 16px;
+    font-weight: 900;
+}
+QPushButton[nav="true"]:hover {
+    color: #244f66;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #ffffff, stop:0.58 #eaffff, stop:1 #fff2f8);
+    border-color: #8bd8eb;
+    border-left-color: #ff9fc3;
+}
 QPushButton[active="true"] {
     color: #ffffff;
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
         stop:0 #64c9e8, stop:0.55 #85decf, stop:1 #ffb8d1);
     border-color: #ffffff;
     font-weight: 900;
+}
+QPushButton[nav="true"][active="true"] {
+    color: #ffffff;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #64c9e8, stop:0.5 #85decf, stop:1 #ffadc8);
+    border-color: rgba(255, 255, 255, 220);
+    border-left: 4px solid #ffd374;
+    text-align: left;
+    padding-left: 16px;
 }
 #petToggleButton {
     color: #ffffff;
@@ -815,7 +1305,7 @@ QPushButton[active="true"] {
     text-align: center;
 }
 #primaryAction {
-    min-width: 156px;
+    min-width: 108px;
     color: #ffffff;
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
         stop:0 #ff9fc3, stop:1 #ffc46b);
@@ -825,7 +1315,7 @@ QPushButton[active="true"] {
     text-align: center;
 }
 #heroAction {
-    min-width: 156px;
+    min-width: 108px;
     color: #31526a;
     background: rgba(255, 255, 255, 210);
     border-color: #bde9f2;
@@ -840,8 +1330,8 @@ QPushButton[active="true"] {
     border-radius: 8px;
 }
 #petStage {
-    min-width: 210px;
-    max-width: 210px;
+    min-width: 140px;
+    max-width: 190px;
     min-height: 246px;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 #ffffff, stop:0.56 #eaf9ff, stop:1 #fff4fa);
@@ -888,7 +1378,7 @@ QPushButton[active="true"] {
     color: #658092;
     font-size: 13px;
 }
-#metricCard, #infoPanel {
+#metricCard, #miniStatusCard, #infoPanel {
     background: rgba(255, 255, 255, 215);
     border: 1px solid #c4e5ef;
     border-radius: 8px;
@@ -908,6 +1398,79 @@ QPushButton[active="true"] {
 #metricCard[tone="affection"] {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 #f4fff9, stop:1 #dff7ee);
+}
+#miniStatusCard[tone="action"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #ffffff, stop:1 #f3edff);
+}
+#miniStatusCard[tone="reminder"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #fffdf4, stop:1 #fff0c9);
+}
+#miniStatusCard[tone="online"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #f4fff9, stop:1 #dff7ee);
+}
+#miniStatusValue {
+    color: #294f66;
+    font-size: 20px;
+    font-weight: 900;
+}
+#sectionHeading, #rightPanelTitle {
+    color: #284f66;
+    font-size: 18px;
+    font-weight: 900;
+}
+#actionPillButton {
+    min-width: 76px;
+    min-height: 48px;
+    color: #ffffff;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 #64c9e8, stop:0.55 #85decf, stop:1 #ffadc8);
+    border: 1px solid rgba(255, 255, 255, 220);
+    border-radius: 8px;
+    text-align: center;
+    font-size: 15px;
+    font-weight: 900;
+}
+#actionPillButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 #ffadc8, stop:1 #ffd374);
+}
+#rightReminderPanel {
+    min-width: 210px;
+    max-width: 300px;
+}
+#reminderBlock {
+    background: rgba(255, 255, 255, 205);
+    border: 1px solid rgba(198, 232, 243, 210);
+    border-radius: 8px;
+}
+#reminderTitle {
+    color: #284f66;
+    font-size: 14px;
+    font-weight: 900;
+}
+#reminderTag {
+    color: #ffffff;
+    background: #ffadc8;
+    border-radius: 7px;
+    padding: 3px 7px;
+    font-size: 11px;
+    font-weight: 900;
+}
+#reminderText, #footerText {
+    color: #5f7c8d;
+    font-size: 13px;
+    font-weight: 700;
+}
+#logBubble {
+    color: #45687b;
+    background: rgba(255, 255, 255, 190);
+    border: 1px solid rgba(194, 229, 239, 180);
+    border-radius: 8px;
+    padding: 7px 9px;
+    font-size: 12px;
 }
 #eyebrow {
     color: #50b9d2;

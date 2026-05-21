@@ -1,9 +1,15 @@
 import json
 from copy import deepcopy
 from datetime import datetime
+from datetime import time as datetime_time
+from datetime import timedelta
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
+
+
+WEEKDAY_ORDER = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+WEEKDAY_INDEX = {name: index for index, name in enumerate(WEEKDAY_ORDER)}
 
 
 ITEM_CATALOG = {
@@ -156,6 +162,25 @@ DEFAULT_DATA = {
         "remaining_seconds": 0,
         "ends_at": 0,
     },
+    "course_reminders": [
+        {
+            "title": "项目完善 / 自习",
+            "time": "19:30",
+            "location": "桌面工作区",
+            "note": "整理北极熊桌宠功能与素材",
+            "day": "每天",
+            "source": "default",
+        },
+        {
+            "title": "课程提醒示例",
+            "time": "08:30",
+            "location": "教学楼",
+            "note": "可在课程提醒页修改或删除",
+            "day": "周一",
+            "source": "default",
+        },
+    ],
+    "chat_history": [],
     "logs": [],
 }
 
@@ -194,6 +219,14 @@ class PetDataStore(QObject):
     @property
     def logs(self):
         return self.data["logs"]
+
+    @property
+    def course_reminders(self):
+        return self.data["course_reminders"]
+
+    @property
+    def chat_history(self):
+        return self.data["chat_history"]
 
     @property
     def active_buffs(self):
@@ -261,6 +294,30 @@ class PetDataStore(QObject):
         self.data.setdefault("focus_session", deepcopy(DEFAULT_DATA["focus_session"]))
         for key, value in DEFAULT_DATA["focus_session"].items():
             self.data["focus_session"].setdefault(key, value)
+        if not isinstance(self.data.get("course_reminders"), list):
+            self.data["course_reminders"] = deepcopy(DEFAULT_DATA["course_reminders"])
+        cleaned_courses = []
+        for course in self.data.get("course_reminders", []):
+            if not isinstance(course, dict):
+                continue
+            cleaned_courses.append(
+                {
+                    "title": str(course.get("title") or "未命名课程")[:40],
+                    "time": str(course.get("time") or "00:00")[:8],
+                    "location": str(course.get("location") or "未设置地点")[:40],
+                    "note": str(course.get("note") or "提前准备一下")[:80],
+                    "day": self._normalize_course_day(course.get("day", "每天")),
+                    "source": str(course.get("source") or "manual")[:20],
+                }
+            )
+        self.data["course_reminders"] = cleaned_courses[:40]
+        if not isinstance(self.data.get("chat_history"), list):
+            self.data["chat_history"] = []
+        self.data["chat_history"] = [
+            item
+            for item in self.data.get("chat_history", [])
+            if isinstance(item, dict) and item.get("role") and item.get("text")
+        ][:60]
         self.data.setdefault("logs", [])
 
     def _today(self):
@@ -345,6 +402,214 @@ class PetDataStore(QObject):
 
     def clear_logs(self):
         self.data["logs"] = []
+        self._commit()
+
+    def _normalize_course_day(self, day):
+        text = str(day or "每天").strip()
+        aliases = {
+            "星期一": "周一",
+            "礼拜一": "周一",
+            "一": "周一",
+            "1": "周一",
+            "星期二": "周二",
+            "礼拜二": "周二",
+            "二": "周二",
+            "2": "周二",
+            "星期三": "周三",
+            "礼拜三": "周三",
+            "三": "周三",
+            "3": "周三",
+            "星期四": "周四",
+            "礼拜四": "周四",
+            "四": "周四",
+            "4": "周四",
+            "星期五": "周五",
+            "礼拜五": "周五",
+            "五": "周五",
+            "5": "周五",
+            "星期六": "周六",
+            "礼拜六": "周六",
+            "六": "周六",
+            "6": "周六",
+            "星期日": "周日",
+            "星期天": "周日",
+            "礼拜日": "周日",
+            "礼拜天": "周日",
+            "日": "周日",
+            "天": "周日",
+            "7": "周日",
+        }
+        if text in WEEKDAY_INDEX or text == "每天":
+            return text
+        return aliases.get(text, "每天")
+
+    def add_course_reminder(self, title, time_text, location, note, day="每天", source="manual"):
+        title = (title or "").strip()[:40] or "未命名课程"
+        time_text = (time_text or "00:00").strip()[:8]
+        location = (location or "").strip()[:40] or "未设置地点"
+        note = (note or "").strip()[:80] or "提前准备一下"
+        day = self._normalize_course_day(day)
+        self.data.setdefault("course_reminders", [])
+        self.data["course_reminders"].append(
+            {
+                "title": title,
+                "time": time_text,
+                "location": location,
+                "note": note,
+                "day": day,
+                "source": str(source or "manual")[:20],
+            }
+        )
+        self.data["course_reminders"] = sorted(
+            self.data["course_reminders"],
+            key=lambda item: (self._course_day_sort(item.get("day")), str(item.get("time", "99:99"))),
+        )[:40]
+        self.add_log("课程", f"已添加《{title}》提醒，{day} {time_text}。")
+
+    def import_course_reminders(self, courses, replace=False):
+        incoming = courses or []
+        if replace:
+            self.data["course_reminders"] = []
+        existing = {
+            (
+                self._normalize_course_day(course.get("day", "每天")),
+                str(course.get("time", "00:00")),
+                str(course.get("title", "")),
+                str(course.get("location", "")),
+            )
+            for course in self.data.get("course_reminders", [])
+        }
+        added = 0
+        for course in incoming:
+            title = str(course.get("title") or "").strip()[:40]
+            if not title:
+                continue
+            day = self._normalize_course_day(course.get("day", "每天"))
+            time_text = str(course.get("time") or "00:00")[:8]
+            location = str(course.get("location") or "待确认地点")[:40]
+            key = (day, time_text, title, location)
+            if key in existing:
+                continue
+            self.data.setdefault("course_reminders", []).append(
+                {
+                    "title": title,
+                    "time": time_text,
+                    "location": location,
+                    "note": str(course.get("note") or "课表识别导入")[:80],
+                    "day": day,
+                    "source": str(course.get("source") or "ocr")[:20],
+                }
+            )
+            existing.add(key)
+            added += 1
+        self.data["course_reminders"] = sorted(
+            self.data.get("course_reminders", []),
+            key=lambda item: (self._course_day_sort(item.get("day")), str(item.get("time", "99:99"))),
+        )[:40]
+        if added:
+            self.add_log("课程", f"从课表识别导入 {added} 条课程提醒。")
+        else:
+            self.add_log("课程", "没有导入新的课程，可能是没有识别到有效课程或内容已存在。")
+        return added
+
+    def clear_course_reminders(self):
+        self.data["course_reminders"] = []
+        self.add_log("课程", "已清空课程提醒。")
+
+    def remove_course_reminder(self, index):
+        courses = self.data.setdefault("course_reminders", [])
+        if index < 0 or index >= len(courses):
+            return False
+        course = courses.pop(index)
+        self.add_log("课程", f"已删除《{course.get('title', '课程')}》提醒。")
+        return True
+
+    def _course_day_sort(self, day):
+        normalized = self._normalize_course_day(day)
+        return -1 if normalized == "每天" else WEEKDAY_INDEX.get(normalized, 8)
+
+    def _parse_course_time(self, time_text):
+        try:
+            hour, minute = str(time_text or "00:00")[:5].split(":")
+            return datetime_time(max(0, min(23, int(hour))), max(0, min(59, int(minute))))
+        except (TypeError, ValueError):
+            return datetime_time(0, 0)
+
+    def _next_course_datetime(self, course, now=None):
+        now = now or datetime.now()
+        course_time = self._parse_course_time(course.get("time", "00:00"))
+        day = self._normalize_course_day(course.get("day", "每天"))
+        if day == "每天":
+            target_date = now.date()
+            candidate = datetime.combine(target_date, course_time)
+            if candidate < now:
+                candidate += timedelta(days=1)
+            return candidate
+        target_index = WEEKDAY_INDEX.get(day, now.weekday())
+        days_delta = (target_index - now.weekday()) % 7
+        candidate = datetime.combine(now.date() + timedelta(days=days_delta), course_time)
+        if candidate < now:
+            candidate += timedelta(days=7)
+        return candidate
+
+    def next_course_reminder(self, now=None):
+        courses = list(self.data.get("course_reminders", []))
+        if not courses:
+            return None
+        now = now or datetime.now()
+        ordered = sorted(courses, key=lambda course: self._next_course_datetime(course, now))
+        if not ordered:
+            return None
+        course = dict(ordered[0])
+        next_at = self._next_course_datetime(course, now)
+        course["next_at_text"] = self._format_course_next_at(next_at, now)
+        course["minutes_left"] = max(0, int((next_at - now).total_seconds() // 60))
+        course["day"] = self._normalize_course_day(course.get("day", "每天"))
+        return course
+
+    def _format_course_next_at(self, next_at, now=None):
+        now = now or datetime.now()
+        if next_at.date() == now.date():
+            return f"今天 {next_at.strftime('%H:%M')}"
+        if next_at.date() == (now + timedelta(days=1)).date():
+            return f"明天 {next_at.strftime('%H:%M')}"
+        return f"{WEEKDAY_ORDER[next_at.weekday()]} {next_at.strftime('%H:%M')}"
+
+    def course_summary(self):
+        course = self.next_course_reminder()
+        if not course:
+            return "暂无课程提醒", "时间待同步", "地点未设置"
+        title = course.get("title", "未命名课程")
+        time_text = course.get("next_at_text") or f"{course.get('day', '每天')} {course.get('time', '00:00')}"
+        location = course.get("location", "未设置地点")
+        return title, time_text, location
+
+    def trigger_course_bubble(self):
+        course = self.next_course_reminder()
+        if not course:
+            self.add_log("课程", "暂无可提醒课程。")
+            return "暂无课程提醒。"
+        minutes_left = int(course.get("minutes_left", 0))
+        countdown = f"{minutes_left} 分钟后" if minutes_left < 180 else course.get("next_at_text", course.get("time", "00:00"))
+        message = f"{countdown}《{course.get('title', '课程')}》@ {course.get('location', '未设置地点')}"
+        self.add_log("课程", f"触发课程提醒：{message}")
+        return message
+
+    def add_chat_message(self, role, text):
+        role = "bear" if role == "bear" else "user"
+        text = str(text or "").strip()
+        if not text:
+            return
+        self.data.setdefault("chat_history", [])
+        self.data["chat_history"].insert(
+            0,
+            {
+                "role": role,
+                "text": text[:160],
+                "time": datetime.now().strftime("%H:%M"),
+            },
+        )
+        self.data["chat_history"] = self.data["chat_history"][:60]
         self._commit()
 
     def adjust_stats(self, effects):
