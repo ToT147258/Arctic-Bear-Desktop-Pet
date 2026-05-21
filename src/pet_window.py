@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QElapsedTimer, QTimer, Signal
-from PySide6.QtGui import QColor, QImageReader, QPainter, QPen, QPixmap, QTransform
+from PySide6.QtGui import QColor, QImage, QImageReader, QPainter, QPen, QPixmap, QTransform
 from PySide6.QtWidgets import QApplication, QMenu, QWidget
 
 
@@ -236,6 +236,7 @@ class PolarBearPetWindow(QWidget):
             source_frames = action.source_frames or action.frames
             action.frames = self._scale_frames(source_frames)
         self._rebuild_return_transitions()
+        self._frame_bounds_cache.clear()
         self._warm_frame_cache()
         current_action = self._current_action()
         if current_action and current_action.frames:
@@ -443,6 +444,7 @@ class PolarBearPetWindow(QWidget):
         for frame in warm_frames:
             if frame.isNull():
                 continue
+            self._frame_alpha_bounds(frame)
             size = frame.size()
             dpr = frame.devicePixelRatio()
             if size != last_size or abs(dpr - last_dpr) > 0.01:
@@ -796,20 +798,33 @@ class PolarBearPetWindow(QWidget):
         if cached is not None:
             return QRectF(cached)
 
-        image = frame.toImage()
+        image = frame.toImage().convertToFormat(QImage.Format_Alpha8)
         width = image.width()
         height = image.height()
         left = width
         top = height
         right = -1
         bottom = -1
+        bytes_per_line = image.bytesPerLine()
+        data = bytes(image.constBits())[: bytes_per_line * height]
         for y in range(height):
-            for x in range(width):
-                if image.pixelColor(x, y).alpha() > 8:
-                    left = min(left, x)
-                    top = min(top, y)
-                    right = max(right, x)
-                    bottom = max(bottom, y)
+            row = data[y * bytes_per_line : y * bytes_per_line + width]
+            row_left = None
+            for x, alpha in enumerate(row):
+                if alpha > 8:
+                    row_left = x
+                    break
+            if row_left is None:
+                continue
+            row_right = width - 1
+            for offset, alpha in enumerate(reversed(row)):
+                if alpha > 8:
+                    row_right = width - 1 - offset
+                    break
+            left = min(left, row_left)
+            top = min(top, y)
+            right = max(right, row_right)
+            bottom = max(bottom, y)
 
         logical_size = frame.deviceIndependentSize()
         if right < left or bottom < top:
@@ -897,10 +912,10 @@ class PolarBearPetWindow(QWidget):
         snapped_side = None
 
         if rect.left() <= area_left + threshold:
-            next_x += round(area_left + margin - rect.left())
+            next_x += round(area_left - rect.left())
             snapped_side = "left"
         elif rect.right() >= area_right - threshold:
-            next_x += round(area_right - margin - rect.right())
+            next_x += round(area_right - rect.right())
             snapped_side = "right"
 
         if rect.top() <= area_top + threshold:
@@ -927,14 +942,13 @@ class PolarBearPetWindow(QWidget):
         self.play_action(edge_action, transition=False)
         area = self._available_screen_area()
         if area:
-            margin = max(2, round(4 * self._scale))
             rect = self._visible_pet_screen_rect()
             next_x = self.x()
             if side == "left":
-                next_x += round(area.left() + margin - rect.left())
+                next_x += round(area.left() - rect.left())
             else:
-                next_x += round(area.left() + area.width() - margin - rect.right())
-            next_x, next_y = self.fit_position_to_visible_screen(next_x, self.y(), margin=margin)
+                next_x += round(area.left() + area.width() - rect.right())
+            next_x, next_y = self.fit_position_to_visible_screen(next_x, self.y(), margin=0)
             if next_x != self.x() or next_y != self.y():
                 self.move(next_x, next_y)
         self._edge_stick_side = side
@@ -1063,25 +1077,6 @@ class PolarBearPetWindow(QWidget):
         quit_action = menu.addAction("退出")
         quit_action.triggered.connect(lambda checked=False: self.interaction_requested.emit("quit_app"))
         menu.exec(event.globalPos())
-        return
-        scale_menu = menu.addMenu(f"缩放比例：{self.scale_percent}%")
-        for scale in (0.4, 0.5, 0.6, 0.75, 0.9, 1.0):
-            action = scale_menu.addAction(f"{int(scale * 100)}%")
-            action.setCheckable(True)
-            action.setChecked(abs(self._scale - scale) < 0.01)
-            action.triggered.connect(lambda checked=False, value=scale: self.set_pet_scale(value))
-        menu.addSeparator()
-        walk_move_action = menu.addAction("走路时移动窗口")
-        walk_move_action.setCheckable(True)
-        walk_move_action.setChecked(self._walk_window_move)
-        walk_move_action.triggered.connect(lambda checked=False: self.set_walk_window_move(checked))
-        menu.addSeparator()
-        for action_name in ("idle", "blink", "touch", "walk_left", "walk_right", "jump", "wave", "sleep"):
-            if action_name not in self._actions:
-                continue
-            action = menu.addAction(ACTION_LABELS.get(action_name, action_name))
-            action.triggered.connect(lambda checked=False, name=action_name: self._play_menu_action(name))
-        menu.exec(event.globalPos())
 
     def _play_menu_action(self, action_name):
         if action_name == "edge_left":
@@ -1101,9 +1096,10 @@ class PolarBearPetWindow(QWidget):
         scale = self._scale
         content_left = self._walk_visual_padding + round(self._walk_visual_offset_x)
 
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(0, 0, 0, 82))
-        painter.drawEllipse(QRectF(content_left + (self._content_width - 230 * scale) / 2, self.height() - 46 * scale, 230 * scale, 25 * scale))
+        if not self._is_edge_action():
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(0, 0, 0, 82))
+            painter.drawEllipse(QRectF(content_left + (self._content_width - 230 * scale) / 2, self.height() - 46 * scale, 230 * scale, 25 * scale))
 
         frame = self._current_frame()
         if frame:
@@ -1125,6 +1121,9 @@ class PolarBearPetWindow(QWidget):
 
     def _draw_frame(self, painter, frame):
         painter.drawPixmap(self._frame_draw_rect(frame).topLeft(), frame)
+
+    def _is_edge_action(self):
+        return self._action_name in {"edge_left", "edge_right"}
 
     def _draw_static_hint(self, painter):
         if not self.fallback_pixmap.isNull():
