@@ -1339,6 +1339,8 @@ class PolarBearPetApp(QMainWindow):
         return screen.availableGeometry() if screen else None
 
     def _clamped_pet_position(self, x, y):
+        if hasattr(self.pet_window, "fit_position_to_visible_screen"):
+            return self.pet_window.fit_position_to_visible_screen(x, y)
         area = self._screen_area_for_pet()
         if not area:
             return int(x), int(y)

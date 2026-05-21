@@ -83,6 +83,7 @@ class PolarBearPetWindow(QWidget):
         self._actions = {}
         self._transition_action = None
         self._return_transitions = {}
+        self._frame_bounds_cache = {}
         self._action_name = "idle"
         self._frame_index = 0
         self._cycle_count = 0
@@ -770,6 +771,95 @@ class PolarBearPetWindow(QWidget):
         self.update()
         return True
 
+    def _frame_alpha_bounds(self, frame):
+        if not frame or frame.isNull():
+            return QRectF()
+        key = int(frame.cacheKey())
+        cached = self._frame_bounds_cache.get(key)
+        if cached is not None:
+            return QRectF(cached)
+
+        image = frame.toImage()
+        width = image.width()
+        height = image.height()
+        left = width
+        top = height
+        right = -1
+        bottom = -1
+        for y in range(height):
+            for x in range(width):
+                if image.pixelColor(x, y).alpha() > 8:
+                    left = min(left, x)
+                    top = min(top, y)
+                    right = max(right, x)
+                    bottom = max(bottom, y)
+
+        logical_size = frame.deviceIndependentSize()
+        if right < left or bottom < top:
+            bounds = QRectF(0, 0, logical_size.width(), logical_size.height())
+        else:
+            dpr = max(1.0, frame.devicePixelRatio())
+            bounds = QRectF(
+                left / dpr,
+                top / dpr,
+                (right - left + 1) / dpr,
+                (bottom - top + 1) / dpr,
+            )
+        self._frame_bounds_cache[key] = QRectF(bounds)
+        return bounds
+
+    def _frame_draw_rect(self, frame):
+        logical_size = frame.deviceIndependentSize()
+        return QRectF(
+            round(self._pet_draw_center.x() + self._walk_visual_offset_x - logical_size.width() / 2),
+            round(self._pet_draw_center.y() - logical_size.height() / 2),
+            logical_size.width(),
+            logical_size.height(),
+        )
+
+    def _visible_pet_rect(self):
+        frame = self._current_frame()
+        if frame and not frame.isNull():
+            draw_rect = self._frame_draw_rect(frame)
+            bounds = self._frame_alpha_bounds(frame)
+            rect = QRectF(
+                draw_rect.left() + bounds.left(),
+                draw_rect.top() + bounds.top(),
+                bounds.width(),
+                bounds.height(),
+            )
+        else:
+            rect = QRectF(self._pet_draw_rect)
+        pad = max(2, round(5 * self._scale))
+        return rect.adjusted(-pad, -pad, pad, pad)
+
+    def _visible_pet_screen_rect(self, window_x=None, window_y=None):
+        x = self.x() if window_x is None else int(window_x)
+        y = self.y() if window_y is None else int(window_y)
+        return self._visible_pet_rect().translated(x, y)
+
+    def fit_position_to_visible_screen(self, x, y, margin=None):
+        area = self._available_screen_area()
+        if not area:
+            return int(x), int(y)
+        margin = max(2, round(6 * self._scale)) if margin is None else int(margin)
+        rect = self._visible_pet_screen_rect(x, y)
+        area_left = area.left()
+        area_top = area.top()
+        area_right = area.left() + area.width()
+        area_bottom = area.top() + area.height()
+        dx = 0
+        dy = 0
+        if rect.left() < area_left + margin:
+            dx = round(area_left + margin - rect.left())
+        elif rect.right() > area_right - margin:
+            dx = round(area_right - margin - rect.right())
+        if rect.top() < area_top + margin:
+            dy = round(area_top + margin - rect.top())
+        elif rect.bottom() > area_bottom - margin:
+            dy = round(area_bottom - margin - rect.bottom())
+        return int(x + dx), int(y + dy)
+
     def _snap_to_screen_edge(self):
         if not self._edge_snap_enabled:
             return
@@ -777,18 +867,24 @@ class PolarBearPetWindow(QWidget):
         if not area:
             return
         threshold = max(8, int(self._edge_snap_threshold))
+        margin = max(2, round(4 * self._scale))
+        rect = self._visible_pet_screen_rect()
+        area_left = area.left()
+        area_top = area.top()
+        area_right = area.left() + area.width()
+        area_bottom = area.top() + area.height()
         next_x = self.x()
         next_y = self.y()
 
-        if abs(self.x() - area.left()) <= threshold:
-            next_x = area.left()
-        elif abs((area.right() - self.width()) - self.x()) <= threshold:
-            next_x = area.right() - self.width()
+        if rect.left() <= area_left + threshold:
+            next_x += round(area_left + margin - rect.left())
+        elif rect.right() >= area_right - threshold:
+            next_x += round(area_right - margin - rect.right())
 
-        if abs(self.y() - area.top()) <= threshold:
-            next_y = area.top()
-        elif abs((area.bottom() - self.height()) - self.y()) <= threshold:
-            next_y = area.bottom() - self.height()
+        if rect.top() <= area_top + threshold:
+            next_y += round(area_top + margin - rect.top())
+        elif rect.bottom() >= area_bottom - threshold:
+            next_y += round(area_bottom - margin - rect.bottom())
 
         if next_x != self.x() or next_y != self.y():
             self.move(next_x, next_y)
@@ -799,9 +895,10 @@ class PolarBearPetWindow(QWidget):
             self.move(self.x() + dx, self.y() + dy)
             return dx
         old_x = self.x()
-        next_x = max(area.left(), min(self.x() + dx, area.right() - self.width()))
-        next_y = max(area.top(), min(self.y() + dy, area.bottom() - self.height()))
-        hit_horizontal_edge = dx and next_x in (area.left(), area.right() - self.width())
+        raw_x = self.x() + dx
+        raw_y = self.y() + dy
+        next_x, next_y = self.fit_position_to_visible_screen(raw_x, raw_y)
+        hit_horizontal_edge = bool(dx and next_x != int(raw_x))
         if turn_on_edge and hit_horizontal_edge and self._action_name in {"walk_left", "walk_right"}:
             self._walk_visual_offset_x = 0.0
             self._turn_walk_direction()
@@ -954,6 +1051,8 @@ class PolarBearPetWindow(QWidget):
         else:
             self._draw_static_hint(painter)
 
+        if not self._bubble_text:
+            return
         painter.setPen(QPen(QColor(126, 232, 255), max(1, round(2 * scale))))
         painter.setBrush(QColor(12, 24, 38, 220))
         header_rect = QRectF(content_left + round(48 * scale), round(10 * scale), self._content_width - round(96 * scale), max(24, round(34 * scale)))
@@ -973,10 +1072,7 @@ class PolarBearPetWindow(QWidget):
         return action.frames[self._frame_index % len(action.frames)]
 
     def _draw_frame(self, painter, frame):
-        logical_size = frame.deviceIndependentSize()
-        x = round(self._pet_draw_center.x() + self._walk_visual_offset_x - logical_size.width() / 2)
-        y = round(self._pet_draw_center.y() - logical_size.height() / 2)
-        painter.drawPixmap(x, y, frame)
+        painter.drawPixmap(self._frame_draw_rect(frame).topLeft(), frame)
 
     def _draw_static_hint(self, painter):
         if not self.fallback_pixmap.isNull():
