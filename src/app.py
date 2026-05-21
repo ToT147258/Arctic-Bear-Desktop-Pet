@@ -425,6 +425,7 @@ class PolarBearPetApp(QMainWindow):
         self._show_tick_messages(self.store.tick())
         self._refresh_overview()
         self._update_clock_labels()
+        QTimer.singleShot(0, self._show_pet_on_startup)
 
     def _build_ui(self):
         root = AnimatedDashboardRoot()
@@ -955,6 +956,7 @@ class PolarBearPetApp(QMainWindow):
         elif action_name == "drag":
             self.store.add_log("互动", "开始拖拽桌宠。")
         elif action_name == "drag_end":
+            self._save_pet_position()
             self.store.add_log("互动", "拖拽结束，位置已更新。")
 
     def _register_touch_burst(self):
@@ -1134,20 +1136,58 @@ class PolarBearPetApp(QMainWindow):
             text = self.store.logs[index] if index < len(self.store.logs) else "暂无更多日志"
             label.setText(f"- {text}")
 
-    def showEvent(self, event):
-        super().showEvent(event)
-        if self.pet_window.isVisible():
-            self.pet_window.move(self.x() + self.width() - self.pet_window.width() - 24, self.y() + 100)
+    def _screen_area_for_pet(self):
+        screen = QApplication.screenAt(self.pet_window.frameGeometry().center()) or QApplication.primaryScreen()
+        return screen.availableGeometry() if screen else None
+
+    def _clamped_pet_position(self, x, y):
+        area = self._screen_area_for_pet()
+        if not area:
+            return int(x), int(y)
+        x = max(area.left(), min(int(x), area.right() - self.pet_window.width()))
+        y = max(area.top(), min(int(y), area.bottom() - self.pet_window.height()))
+        return x, y
+
+    def _default_pet_position(self):
+        area = QApplication.primaryScreen().availableGeometry() if QApplication.primaryScreen() else None
+        if not area:
+            return 80, 80
+        x = area.right() - self.pet_window.width() - 72
+        y = area.bottom() - self.pet_window.height() - 96
+        return self._clamped_pet_position(x, y)
+
+    def _restore_pet_position(self):
+        settings = self.store.settings
+        try:
+            x = int(settings.get("pet_window_x"))
+            y = int(settings.get("pet_window_y"))
+        except (TypeError, ValueError):
+            x, y = self._default_pet_position()
+        else:
+            x, y = self._clamped_pet_position(x, y)
+        self.pet_window.move(x, y)
+
+    def _save_pet_position(self):
+        self.store.settings["pet_window_x"] = int(self.pet_window.x())
+        self.store.settings["pet_window_y"] = int(self.pet_window.y())
+
+    def _show_pet_on_startup(self):
+        self._restore_pet_position()
+        if not self.pet_window.isVisible():
+            self.pet_window.show()
 
     def closeEvent(self, event):
+        self._save_pet_position()
         self.store.save()
         self.pet_window.close()
         super().closeEvent(event)
 
     def toggle_pet_window(self):
         if self.pet_window.isVisible():
+            self._save_pet_position()
             self.pet_window.hide()
         else:
+            self._restore_pet_position()
             self.pet_window.show()
             self.pet_window.raise_()
 
