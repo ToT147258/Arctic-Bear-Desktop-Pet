@@ -3,8 +3,8 @@ from datetime import datetime
 from math import cos, pi, sin
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QPointF, QRectF, QSize, Qt, QPropertyAnimation, QTimer
-from PySide6.QtGui import QAction, QColor, QFont, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtCore import QEasingCurve, QPointF, QRect, QRectF, QSize, Qt, QPropertyAnimation, QTimer
+from PySide6.QtGui import QAction, QColor, QFont, QIcon, QImage, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -34,6 +34,41 @@ from src.pet_data import PetDataStore
 from src.pet_window import PolarBearPetWindow
 
 
+def _trim_transparent_pixmap(pixmap, margin=6):
+    if pixmap.isNull():
+        return pixmap
+    image = pixmap.toImage().convertToFormat(QImage.Format_ARGB32)
+    width = image.width()
+    height = image.height()
+    left = width
+    top = height
+    right = -1
+    bottom = -1
+    for y in range(height):
+        for x in range(width):
+            if image.pixelColor(x, y).alpha() > 8:
+                left = min(left, x)
+                top = min(top, y)
+                right = max(right, x)
+                bottom = max(bottom, y)
+    if right < left or bottom < top:
+        return pixmap
+    left = max(0, left - margin)
+    top = max(0, top - margin)
+    right = min(width - 1, right + margin)
+    bottom = min(height - 1, bottom + margin)
+    return pixmap.copy(QRect(left, top, right - left + 1, bottom - top + 1))
+
+
+def _load_first_pixmap(paths, trim=True):
+    for path in paths:
+        if path.exists():
+            pixmap = QPixmap(str(path))
+            if not pixmap.isNull():
+                return _trim_transparent_pixmap(pixmap) if trim else pixmap
+    return QPixmap()
+
+
 class AnimatedDashboardRoot(QWidget):
     def __init__(self):
         super().__init__()
@@ -43,10 +78,7 @@ class AnimatedDashboardRoot(QWidget):
             (rng.random(), rng.random(), rng.uniform(0.5, 1.7), rng.uniform(0.18, 0.7))
             for _ in range(34)
         ]
-        self._timer = QTimer(self)
-        self._timer.setTimerType(Qt.CoarseTimer)
-        self._timer.timeout.connect(self._tick)
-        self._timer.start(90)
+        self.setAttribute(Qt.WA_StaticContents)
 
     def _tick(self):
         if not self.isVisible():
@@ -278,6 +310,162 @@ class SidebarMascotCard(QWidget):
             painter.drawLine(QPointF(rect.left() + x, rect.top() + y - size), QPointF(rect.left() + x, rect.top() + y + size))
 
 
+class PremiumMascotStage(QWidget):
+    def __init__(self, asset_root):
+        super().__init__()
+        self.setObjectName("petStage")
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self._pixmap = _load_first_pixmap(
+            (
+                asset_root / "role" / "PolarBear" / "action" / "video2252_idle_still_000.png",
+                asset_root / "role" / "PolarBear" / "action" / "video2528_idle_seamless_v1_000.png",
+                asset_root / "polar-bear-realistic.png",
+                asset_root / "polar-bear-premium.png",
+            )
+        )
+        self._scaled_pixmap = QPixmap()
+        self._scaled_size = QSize()
+
+    def sizeHint(self):
+        return QSize(196, 282)
+
+    def minimumSizeHint(self):
+        return QSize(176, 258)
+
+    def _scaled_bear(self, target_size):
+        if self._pixmap.isNull() or target_size.isEmpty():
+            return QPixmap()
+        if self._scaled_pixmap.isNull() or self._scaled_size != target_size:
+            self._scaled_pixmap = self._pixmap.scaled(
+                target_size,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+            self._scaled_size = QSize(target_size)
+        return self._scaled_pixmap
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+
+        bg = QLinearGradient(rect.topLeft(), rect.bottomRight())
+        bg.setColorAt(0.0, QColor("#ffffff"))
+        bg.setColorAt(0.58, QColor("#ecfbff"))
+        bg.setColorAt(1.0, QColor("#f7f3ff"))
+        painter.setBrush(bg)
+        painter.setPen(QPen(QColor("#a9e2ef"), 1.4))
+        painter.drawRoundedRect(rect, 8, 8)
+
+        glow = QLinearGradient(rect.left(), rect.top(), rect.right(), rect.bottom())
+        glow.setColorAt(0.0, QColor(255, 255, 255, 130))
+        glow.setColorAt(1.0, QColor(126, 232, 255, 28))
+        painter.setBrush(glow)
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(rect.adjusted(8, 8, -8, -8), 8, 8)
+
+        if not self._pixmap.isNull():
+            target = QRectF(rect.left() + 22, rect.top() + 22, rect.width() - 44, rect.height() - 64)
+            scaled = self._scaled_bear(target.size().toSize())
+            image_rect = QRectF(
+                rect.center().x() - scaled.width() / 2,
+                target.bottom() - scaled.height(),
+                scaled.width(),
+                scaled.height(),
+            )
+            painter.setBrush(QColor(54, 92, 118, 34))
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(QRectF(rect.center().x() - 62, rect.bottom() - 42, 124, 18))
+            painter.drawPixmap(image_rect.toRect(), scaled)
+
+        pill = QRectF(rect.left() + 26, rect.bottom() - 32, rect.width() - 52, 22)
+        painter.setBrush(QColor(255, 255, 255, 190))
+        painter.setPen(QPen(QColor("#b9e8f2"), 1))
+        painter.drawRoundedRect(pill, 8, 8)
+        painter.setBrush(QColor("#74d6e9"))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(QRectF(pill.left() + 10, pill.center().y() - 3, 6, 6))
+        painter.setPen(QColor("#52768a"))
+        painter.setFont(QFont("Microsoft YaHei UI", 8, QFont.DemiBold))
+        painter.drawText(pill.adjusted(20, 0, -8, 0), Qt.AlignVCenter | Qt.AlignLeft, "在线陪伴")
+
+
+class PremiumSidebarMascotCard(QWidget):
+    def __init__(self, asset_root):
+        super().__init__()
+        self.setObjectName("sidebarMascotCard")
+        self._pixmap = _load_first_pixmap(
+            (
+                asset_root / "role" / "PolarBear" / "action" / "clean_wave_v1_000.png",
+                asset_root / "role" / "PolarBear" / "action" / "video2252_idle_still_000.png",
+                asset_root / "polar-bear-realistic.png",
+            )
+        )
+        self._scaled_pixmap = QPixmap()
+        self._scaled_size = QSize()
+
+    def sizeHint(self):
+        return QSize(202, 136)
+
+    def _scaled_bear(self, target_size):
+        if self._pixmap.isNull() or target_size.isEmpty():
+            return QPixmap()
+        if self._scaled_pixmap.isNull() or self._scaled_size != target_size:
+            self._scaled_pixmap = self._pixmap.scaled(
+                target_size,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+            self._scaled_size = QSize(target_size)
+        return self._scaled_pixmap
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+
+        bg = QLinearGradient(rect.topLeft(), rect.bottomRight())
+        bg.setColorAt(0.0, QColor("#ffffff"))
+        bg.setColorAt(0.56, QColor("#e9fbff"))
+        bg.setColorAt(1.0, QColor("#fff1f7"))
+        painter.setBrush(bg)
+        painter.setPen(QPen(QColor("#a7def0"), 1.2))
+        painter.drawRoundedRect(rect, 8, 8)
+
+        painter.setPen(QPen(QColor(100, 201, 232, 90), 3, Qt.SolidLine, Qt.RoundCap))
+        wave = QPainterPath()
+        base_y = rect.top() + 35
+        wave.moveTo(rect.left() + 12, base_y)
+        wave.cubicTo(rect.left() + 48, base_y - 18, rect.left() + 78, base_y + 18, rect.left() + 114, base_y)
+        painter.drawPath(wave)
+
+        painter.setPen(QColor("#4db7d0"))
+        painter.setFont(QFont("Microsoft YaHei UI", 9, QFont.Black))
+        painter.drawText(QRectF(rect.left() + 14, rect.top() + 16, 94, 18), Qt.AlignLeft | Qt.AlignVCenter, "ARCTIC HUB")
+        painter.setPen(QColor("#ff8ebc"))
+        painter.setFont(QFont("Microsoft YaHei UI", 12, QFont.Black))
+        painter.drawText(QRectF(rect.left() + 14, rect.top() + 42, 98, 26), Qt.AlignLeft | Qt.AlignVCenter, "暖暖陪伴")
+        painter.setPen(QColor("#66899b"))
+        painter.setFont(QFont("Microsoft YaHei UI", 8, QFont.DemiBold))
+        painter.drawText(QRectF(rect.left() + 14, rect.top() + 74, 96, 32), Qt.AlignLeft | Qt.TextWordWrap, "状态、动作、提醒一屏掌握")
+
+        painter.setBrush(QColor(92, 142, 170, 38))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(QRectF(rect.right() - 92, rect.bottom() - 24, 64, 11))
+        if not self._pixmap.isNull():
+            target = QRectF(rect.right() - 106, rect.top() + 20, 82, 96)
+            scaled = self._scaled_bear(target.size().toSize())
+            image_rect = QRectF(
+                target.center().x() - scaled.width() / 2,
+                target.bottom() - scaled.height(),
+                scaled.width(),
+                scaled.height(),
+            )
+            painter.drawPixmap(image_rect.toRect(), scaled)
+
+
 class CareIndexDial(QWidget):
     def __init__(self):
         super().__init__()
@@ -502,7 +690,7 @@ class PolarBearPetApp(QMainWindow):
         sidebar_layout.addWidget(subtitle)
         sidebar_layout.addWidget(status)
 
-        mascot = SidebarMascotCard(Path(__file__).resolve().parents[1] / "assets" / "polar_bear")
+        mascot = PremiumSidebarMascotCard(Path(__file__).resolve().parents[1] / "assets" / "polar_bear")
         sidebar_layout.addWidget(mascot)
         self._apply_soft_shadow(mascot, 22, 0, 7, QColor(100, 201, 232, 42))
 
@@ -584,7 +772,7 @@ class PolarBearPetApp(QMainWindow):
         self.hero_status_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         hero_text.addWidget(self.hero_status_label)
 
-        pet_stage = MascotStage(Path(__file__).resolve().parents[1] / "assets" / "polar_bear")
+        pet_stage = PremiumMascotStage(Path(__file__).resolve().parents[1] / "assets" / "polar_bear")
         self._pet_stage = pet_stage
 
         actions = QVBoxLayout()
@@ -611,7 +799,7 @@ class PolarBearPetApp(QMainWindow):
         hero_side.addLayout(actions)
 
         hero_layout.addLayout(hero_text, 1)
-        hero_layout.addWidget(pet_stage, 0)
+        hero_layout.addWidget(pet_stage, 0, Qt.AlignVCenter)
         hero_layout.addLayout(hero_side, 0)
         main_column.addWidget(hero)
         self._apply_soft_shadow(hero, 30, 0, 10, QColor(255, 173, 200, 52))
@@ -937,6 +1125,16 @@ class PolarBearPetApp(QMainWindow):
         self.pet_window.update()
 
     def _handle_pet_window_interaction(self, action_name):
+        if action_name == "show_panel":
+            self._show_console()
+            return
+        if action_name == "hide_pet":
+            self._save_pet_position()
+            self.pet_window.hide()
+            return
+        if action_name == "quit_app":
+            QApplication.instance().quit()
+            return
         if action_name == "touch":
             self.store.touch()
             self._register_touch_burst()
@@ -1370,9 +1568,10 @@ QPushButton[nav="true"][active="true"] {
     border-radius: 8px;
 }
 #petStage {
-    min-width: 140px;
-    max-width: 190px;
-    min-height: 246px;
+    min-width: 176px;
+    max-width: 196px;
+    min-height: 258px;
+    max-height: 282px;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 #ffffff, stop:0.56 #eaf9ff, stop:1 #fff4fa);
     border: 1px solid #c7eaf3;

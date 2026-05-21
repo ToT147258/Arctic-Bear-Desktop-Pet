@@ -93,6 +93,7 @@ class PolarBearPetWindow(QWidget):
         self._screen_area_cache = None
         self._next_random_action = self._random_idle_delay()
         self._idle_events_until_sleep = random.randint(2, 4)
+        self._random_action_pool = []
         self._bubble_text = ""
         self._edge_snap_enabled = True
         self._edge_snap_threshold = 48
@@ -100,6 +101,7 @@ class PolarBearPetWindow(QWidget):
         self._fallback_source_pixmap = QPixmap(str(self.asset_root / "polar-bear-realistic.png"))
         self.fallback_pixmap = self._scale_pixmap(self._fallback_source_pixmap)
         self._load_actions()
+        self._load_random_action_pool()
         self._rebuild_return_transitions()
         self._warm_frame_cache()
 
@@ -455,7 +457,32 @@ class PolarBearPetWindow(QWidget):
             painter.end()
 
     def _random_idle_delay(self):
-        return random.randint(30000, 50000)
+        return random.randint(36000, 68000)
+
+    def _load_random_action_pool(self):
+        name_map = {
+            "default": "idle",
+            "left_walk": "walk_left",
+            "right_walk": "walk_right",
+            "patpat": "wave",
+        }
+        pet_conf = self._read_pet_conf()
+        pool = []
+        for group in pet_conf.get("random_act", []):
+            try:
+                weight = float(group.get("act_prob", 0))
+            except (TypeError, ValueError):
+                weight = 0
+            if weight <= 0:
+                continue
+            candidates = []
+            for action_name in group.get("act_list", []):
+                normalized = name_map.get(action_name, action_name)
+                if normalized in self._actions:
+                    candidates.append(normalized)
+            if candidates:
+                pool.append((weight, candidates))
+        self._random_action_pool = pool
 
     def _tick(self):
         if not self.isVisible():
@@ -571,14 +598,22 @@ class PolarBearPetWindow(QWidget):
             self._walk_visual_offset_x = 0.0
 
     def _play_random_action(self):
-        self._idle_events_until_sleep -= 1
-        if self._idle_events_until_sleep <= 0 and "sleep" in self._actions:
-            self.play_action("sleep")
-            self._idle_events_until_sleep = random.randint(2, 4)
-            self._next_random_action = self._random_idle_delay()
-            return
-
         self._next_random_action = self._random_idle_delay()
+        if not self._random_action_pool:
+            return
+        total = sum(weight for weight, _ in self._random_action_pool)
+        if total <= 0:
+            return
+        pick = random.uniform(0, total)
+        chosen = "idle"
+        for weight, candidates in self._random_action_pool:
+            pick -= weight
+            if pick <= 0:
+                chosen = random.choice(candidates)
+                break
+        if chosen == "idle":
+            return
+        self.play_action(chosen)
 
     def _blend_pixmaps(self, left, right, ratio):
         blended = QPixmap(left.size())
@@ -844,6 +879,39 @@ class PolarBearPetWindow(QWidget):
 
     def contextMenuEvent(self, event):
         menu = QMenu(self)
+        panel_action = menu.addAction("打开控制面板")
+        panel_action.triggered.connect(lambda checked=False: self.interaction_requested.emit("show_panel"))
+        hide_action = menu.addAction("隐藏桌宠")
+        hide_action.triggered.connect(lambda checked=False: self.interaction_requested.emit("hide_pet"))
+        menu.addSeparator()
+
+        action_menu = menu.addMenu("动作")
+        for action_name in ("idle", "blink", "touch", "walk_left", "walk_right", "jump", "wave", "sleep"):
+            if action_name not in self._actions:
+                continue
+            action = action_menu.addAction(ACTION_LABELS.get(action_name, action_name))
+            action.triggered.connect(lambda checked=False, name=action_name: self._play_menu_action(name))
+
+        scale_menu = menu.addMenu(f"缩放比例：{self.scale_percent}%")
+        for scale in (0.4, 0.5, 0.6, 0.75, 0.9, 1.0):
+            action = scale_menu.addAction(f"{int(scale * 100)}%")
+            action.setCheckable(True)
+            action.setChecked(abs(self._scale - scale) < 0.01)
+            action.triggered.connect(lambda checked=False, value=scale: self.set_pet_scale(value))
+        menu.addSeparator()
+        walk_move_action = menu.addAction("走路时移动窗口")
+        walk_move_action.setCheckable(True)
+        walk_move_action.setChecked(self._walk_window_move)
+        walk_move_action.triggered.connect(lambda checked=False: self.set_walk_window_move(checked))
+        edge_snap_action = menu.addAction("贴边吸附")
+        edge_snap_action.setCheckable(True)
+        edge_snap_action.setChecked(self._edge_snap_enabled)
+        edge_snap_action.triggered.connect(lambda checked=False: self.set_edge_snap(checked))
+        menu.addSeparator()
+        quit_action = menu.addAction("退出")
+        quit_action.triggered.connect(lambda checked=False: self.interaction_requested.emit("quit_app"))
+        menu.exec(event.globalPos())
+        return
         scale_menu = menu.addMenu(f"缩放比例：{self.scale_percent}%")
         for scale in (0.4, 0.5, 0.6, 0.75, 0.9, 1.0):
             action = scale_menu.addAction(f"{int(scale * 100)}%")

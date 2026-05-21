@@ -17,6 +17,7 @@ env/
 # Local diagnostics and generated scratch output
 diagnostics/
 tmp_video_samples/
+tmp_*.png
 data/save.json
 data/*.json
 data/*.png
