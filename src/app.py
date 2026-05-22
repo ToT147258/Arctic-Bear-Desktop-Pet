@@ -40,10 +40,11 @@ from src.pet_window import PolarBearPetWindow
 WM_HOTKEY = 0x0312
 MOD_ALT = 0x0001
 MOD_CONTROL = 0x0002
+MOD_SHIFT = 0x0004
+MOD_WIN = 0x0008
 MOD_NOREPEAT = 0x4000
-VK_B = 0x42
 PET_TOGGLE_HOTKEY_ID = 0x1472
-PET_TOGGLE_HOTKEY_TEXT = "Ctrl+Alt+B"
+DEFAULT_PET_TOGGLE_HOTKEY_TEXT = "Ctrl+Alt+B"
 
 
 def _trim_transparent_pixmap(pixmap, margin=6):
@@ -79,6 +80,80 @@ def _load_first_pixmap(paths, trim=True):
             if not pixmap.isNull():
                 return _trim_transparent_pixmap(pixmap) if trim else pixmap
     return QPixmap()
+
+
+def _enum_value(value):
+    try:
+        return int(value)
+    except TypeError:
+        return int(value.value)
+
+
+def _qt_key_to_vk(key):
+    key = _enum_value(key)
+    key_a = _enum_value(Qt.Key.Key_A)
+    key_z = _enum_value(Qt.Key.Key_Z)
+    key_0 = _enum_value(Qt.Key.Key_0)
+    key_9 = _enum_value(Qt.Key.Key_9)
+    key_f1 = _enum_value(Qt.Key.Key_F1)
+    key_f24 = _enum_value(Qt.Key.Key_F24)
+    if key_a <= key <= key_z or key_0 <= key <= key_9:
+        return key
+    if key_f1 <= key <= key_f24:
+        return 0x70 + (key - key_f1)
+    special_keys = {
+        Qt.Key.Key_Space: 0x20,
+        Qt.Key.Key_Tab: 0x09,
+        Qt.Key.Key_Backspace: 0x08,
+        Qt.Key.Key_Return: 0x0D,
+        Qt.Key.Key_Enter: 0x0D,
+        Qt.Key.Key_Escape: 0x1B,
+        Qt.Key.Key_Insert: 0x2D,
+        Qt.Key.Key_Delete: 0x2E,
+        Qt.Key.Key_Home: 0x24,
+        Qt.Key.Key_End: 0x23,
+        Qt.Key.Key_PageUp: 0x21,
+        Qt.Key.Key_PageDown: 0x22,
+        Qt.Key.Key_Left: 0x25,
+        Qt.Key.Key_Up: 0x26,
+        Qt.Key.Key_Right: 0x27,
+        Qt.Key.Key_Down: 0x28,
+    }
+    for qt_key, vk in special_keys.items():
+        if key == _enum_value(qt_key):
+            return vk
+    return None
+
+
+def _normalized_hotkey_text(hotkey_text):
+    sequence = QKeySequence(str(hotkey_text or "").strip())
+    if sequence.isEmpty() or sequence.count() != 1:
+        return ""
+    return sequence.toString(QKeySequence.SequenceFormat.PortableText)
+
+
+def _windows_hotkey_parts(hotkey_text):
+    sequence = QKeySequence(hotkey_text)
+    if sequence.isEmpty() or sequence.count() != 1:
+        return None
+    combination = sequence[0]
+    modifiers = combination.keyboardModifiers()
+    key = combination.key()
+    vk = _qt_key_to_vk(key)
+    if vk is None:
+        return None
+    win_modifiers = 0
+    if modifiers & Qt.KeyboardModifier.ControlModifier:
+        win_modifiers |= MOD_CONTROL
+    if modifiers & Qt.KeyboardModifier.AltModifier:
+        win_modifiers |= MOD_ALT
+    if modifiers & Qt.KeyboardModifier.ShiftModifier:
+        win_modifiers |= MOD_SHIFT
+    if modifiers & Qt.KeyboardModifier.MetaModifier:
+        win_modifiers |= MOD_WIN
+    if not win_modifiers:
+        return None
+    return win_modifiers, vk
 
 
 class AnimatedDashboardRoot(QWidget):
@@ -586,6 +661,10 @@ class PolarBearPetApp(QMainWindow):
         self.current_action_label = None
         self.today_reminder_label = None
         self.online_status_label = None
+        self.pet_toggle_button = None
+        self.hero_show_pet_button = None
+        self.tray_show_pet_action = None
+        self.tray_toggle_pet_action = None
         self.top_time_label = None
         self.clock_label = None
         self.course_title_label = None
@@ -605,6 +684,10 @@ class PolarBearPetApp(QMainWindow):
         self._page_transition = None
         self._did_initial_page_show = False
         self._pet_user_hidden = False
+        self._pet_hotkey_text = (
+            _normalized_hotkey_text(self.store.settings.get("pet_toggle_hotkey"))
+            or DEFAULT_PET_TOGGLE_HOTKEY_TEXT
+        )
         self._global_hotkey_registered = False
         self._local_pet_shortcut = None
         self._touch_burst_count = 0
@@ -655,7 +738,17 @@ class PolarBearPetApp(QMainWindow):
             ("动作管理", self._scroll_module_page(InteractionPage(self.pet_window, self.store, self._play_pet_action, self.toggle_pet_window))),
             ("聊天互动", self._scroll_module_page(ChatPage(self.store, self.pet_window, self._play_pet_action))),
             ("外观装扮", BackpackPage(self.store, self._play_pet_action)),
-            ("系统设置", self._scroll_module_page(SettingsPage(self.store, self.pet_window))),
+            (
+                "系统设置",
+                self._scroll_module_page(
+                    SettingsPage(
+                        self.store,
+                        self.pet_window,
+                        self.current_pet_hotkey,
+                        self.set_pet_toggle_hotkey,
+                    )
+                ),
+            ),
         ]
 
         for index, (name, page) in enumerate(pages):
@@ -710,7 +803,8 @@ class PolarBearPetApp(QMainWindow):
         sidebar_layout.addWidget(mascot)
         self._apply_soft_shadow(mascot, 22, 0, 7, QColor(100, 201, 232, 42))
 
-        pet_button = QPushButton(f"显示 / 隐藏桌宠  {PET_TOGGLE_HOTKEY_TEXT}")
+        pet_button = QPushButton()
+        self.pet_toggle_button = pet_button
         pet_button.setCursor(Qt.PointingHandCursor)
         pet_button.setObjectName("petToggleButton")
         pet_button.clicked.connect(self.toggle_pet_window)
@@ -793,7 +887,8 @@ class PolarBearPetApp(QMainWindow):
 
         actions = QVBoxLayout()
         actions.setSpacing(10)
-        show_pet = QPushButton(f"唤出桌宠  {PET_TOGGLE_HOTKEY_TEXT}")
+        show_pet = QPushButton()
+        self.hero_show_pet_button = show_pet
         show_pet.clicked.connect(self.show_pet_window)
         show_pet.setObjectName("primaryAction")
         interact = QPushButton("互动反应")
@@ -1222,14 +1317,15 @@ class PolarBearPetApp(QMainWindow):
             return
         icon_path = Path(__file__).resolve().parents[1] / "assets" / "polar_bear" / "polar-bear-realistic.png"
         self.tray_icon = QSystemTrayIcon(QIcon(str(icon_path)), self)
-        self.tray_icon.setToolTip(f"北极熊桌面宠物\n{PET_TOGGLE_HOTKEY_TEXT} 显示/隐藏")
 
         menu = QMenu()
         show_console = QAction("显示控制台", self)
         show_console.triggered.connect(self._show_console)
-        show_pet = QAction(f"唤出桌宠  {PET_TOGGLE_HOTKEY_TEXT}", self)
+        show_pet = QAction(self)
+        self.tray_show_pet_action = show_pet
         show_pet.triggered.connect(self.show_pet_window)
-        toggle_pet = QAction(f"显示 / 隐藏桌宠  {PET_TOGGLE_HOTKEY_TEXT}", self)
+        toggle_pet = QAction(self)
+        self.tray_toggle_pet_action = toggle_pet
         toggle_pet.triggered.connect(self.toggle_pet_window)
         hide_pet = QAction("隐藏桌宠", self)
         hide_pet.triggered.connect(self.hide_pet_window)
@@ -1253,25 +1349,36 @@ class PolarBearPetApp(QMainWindow):
         self.tray_icon.show()
 
     def _setup_pet_hotkeys(self):
-        self._local_pet_shortcut = QShortcut(QKeySequence(PET_TOGGLE_HOTKEY_TEXT), self)
-        self._local_pet_shortcut.setContext(Qt.ApplicationShortcut)
-        self._local_pet_shortcut.activated.connect(self.toggle_pet_window)
+        self._set_local_pet_shortcut(self._pet_hotkey_text)
         self._register_global_pet_hotkey()
+        self._sync_hotkey_labels()
+
+    def _set_local_pet_shortcut(self, hotkey_text):
+        if self._local_pet_shortcut is None:
+            self._local_pet_shortcut = QShortcut(QKeySequence(hotkey_text), self)
+            self._local_pet_shortcut.setContext(Qt.ApplicationShortcut)
+            self._local_pet_shortcut.activated.connect(self.toggle_pet_window)
+        else:
+            self._local_pet_shortcut.setKey(QKeySequence(hotkey_text))
 
     def _register_global_pet_hotkey(self):
+        self._unregister_global_pet_hotkey()
         self._global_hotkey_registered = False
         if not sys.platform.startswith("win"):
-            return
+            return True
+        parts = _windows_hotkey_parts(self._pet_hotkey_text)
+        if not parts:
+            return False
+        modifiers, vk = parts
         try:
             hwnd = wintypes.HWND(int(self.winId()))
-            modifiers = MOD_CONTROL | MOD_ALT | MOD_NOREPEAT
-            ok = ctypes.windll.user32.RegisterHotKey(hwnd, PET_TOGGLE_HOTKEY_ID, modifiers, VK_B)
+            ok = ctypes.windll.user32.RegisterHotKey(hwnd, PET_TOGGLE_HOTKEY_ID, modifiers | MOD_NOREPEAT, vk)
             if not ok:
-                modifiers = MOD_CONTROL | MOD_ALT
-                ok = ctypes.windll.user32.RegisterHotKey(hwnd, PET_TOGGLE_HOTKEY_ID, modifiers, VK_B)
+                ok = ctypes.windll.user32.RegisterHotKey(hwnd, PET_TOGGLE_HOTKEY_ID, modifiers, vk)
         except (AttributeError, OSError, TypeError, ValueError):
             ok = False
         self._global_hotkey_registered = bool(ok)
+        return self._global_hotkey_registered
 
     def _unregister_global_pet_hotkey(self):
         if not self._global_hotkey_registered or not sys.platform.startswith("win"):
@@ -1281,6 +1388,44 @@ class PolarBearPetApp(QMainWindow):
         except (AttributeError, OSError, TypeError, ValueError):
             pass
         self._global_hotkey_registered = False
+
+    def _sync_hotkey_labels(self):
+        hotkey = self._pet_hotkey_text
+        if self.pet_toggle_button:
+            self.pet_toggle_button.setText(f"显示 / 隐藏桌宠  {hotkey}")
+        if self.hero_show_pet_button:
+            self.hero_show_pet_button.setText(f"唤出桌宠  {hotkey}")
+        if self.tray_icon:
+            self.tray_icon.setToolTip(f"北极熊桌面宠物\n{hotkey} 显示/隐藏")
+        if self.tray_show_pet_action:
+            self.tray_show_pet_action.setText(f"唤出桌宠  {hotkey}")
+        if self.tray_toggle_pet_action:
+            self.tray_toggle_pet_action.setText(f"显示 / 隐藏桌宠  {hotkey}")
+
+    def current_pet_hotkey(self):
+        return self._pet_hotkey_text
+
+    def set_pet_toggle_hotkey(self, hotkey_text):
+        normalized = _normalized_hotkey_text(hotkey_text)
+        if not normalized:
+            return False, "快捷键无效：请至少包含 Ctrl / Alt / Shift / Win 中的一个修饰键。"
+        if not _windows_hotkey_parts(normalized):
+            return False, "快捷键无效：暂不支持这个按键，请换成字母、数字、方向键或 F1-F24。"
+
+        old_hotkey = self._pet_hotkey_text
+        self._pet_hotkey_text = normalized
+        self._set_local_pet_shortcut(normalized)
+        ok = self._register_global_pet_hotkey()
+        if sys.platform.startswith("win") and not ok:
+            self._pet_hotkey_text = old_hotkey
+            self._set_local_pet_shortcut(old_hotkey)
+            self._register_global_pet_hotkey()
+            self._sync_hotkey_labels()
+            return False, f"{normalized} 注册失败，可能已经被其他软件占用。"
+
+        self.store.set_setting("pet_toggle_hotkey", normalized)
+        self._sync_hotkey_labels()
+        return True, f"快捷键已更新为 {normalized}。"
 
     def nativeEvent(self, event_type, message):
         if sys.platform.startswith("win"):

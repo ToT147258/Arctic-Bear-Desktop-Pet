@@ -1,18 +1,37 @@
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton, QSlider, QVBoxLayout, QWidget
+from PySide6.QtGui import QKeySequence
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QKeySequenceEdit,
+    QSlider,
+    QVBoxLayout,
+    QWidget,
+)
+
+
+DEFAULT_HOTKEY = "Ctrl+Alt+B"
 
 
 class SettingsPage(QWidget):
-    def __init__(self, store, pet_window):
+    def __init__(self, store, pet_window, get_hotkey=None, set_hotkey=None):
         super().__init__()
         self.store = store
         self.pet_window = pet_window
+        self.get_hotkey = get_hotkey or (lambda: self.store.settings.get("pet_toggle_hotkey", DEFAULT_HOTKEY))
+        self.set_hotkey = set_hotkey or self._fallback_set_hotkey
         self.scale_value = None
         self.opacity_value = None
         self.edge_threshold_value = None
         self.click_threshold_value = None
+        self.hotkey_value = None
+        self.hotkey_editor = None
+        self.hotkey_status = None
         self.scale_slider = None
         self.opacity_slider = None
         self.edge_threshold_slider = None
@@ -36,6 +55,7 @@ class SettingsPage(QWidget):
 
         layout.addWidget(self._scale_card())
         layout.addWidget(self._window_card())
+        layout.addWidget(self._hotkey_card())
         layout.addWidget(self._save_card())
         layout.addStretch()
         self.setStyleSheet(PAGE_STYLE)
@@ -137,6 +157,43 @@ class SettingsPage(QWidget):
         layout.addWidget(self.click_threshold_slider)
         return card
 
+    def _hotkey_card(self):
+        card = QFrame()
+        card.setObjectName("moduleCard")
+        layout = QVBoxLayout(card)
+        title = QLabel("桌宠快捷键")
+        title.setObjectName("cardTitle")
+        desc = QLabel("点击录制框后按下新的组合键，再保存即可。建议使用 Ctrl / Alt / Shift 加字母或功能键。")
+        desc.setWordWrap(True)
+        desc.setObjectName("taskItem")
+        self.hotkey_value = QLabel()
+        self.hotkey_value.setObjectName("taskItem")
+        self.hotkey_editor = QKeySequenceEdit()
+        self.hotkey_editor.setObjectName("hotkeyEditor")
+        self.hotkey_editor.setClearButtonEnabled(True)
+        self.hotkey_editor.setKeySequence(QKeySequence(self.get_hotkey()))
+        self.hotkey_status = QLabel("保存后会立即应用到全局快捷键。")
+        self.hotkey_status.setWordWrap(True)
+        self.hotkey_status.setObjectName("taskItem")
+        row = QHBoxLayout()
+        save = QPushButton("保存快捷键")
+        save.setCursor(Qt.PointingHandCursor)
+        save.setObjectName("moduleAction")
+        save.clicked.connect(self._save_hotkey)
+        reset = QPushButton("恢复 Ctrl+Alt+B")
+        reset.setCursor(Qt.PointingHandCursor)
+        reset.setObjectName("moduleAction")
+        reset.clicked.connect(self._reset_hotkey)
+        row.addWidget(save)
+        row.addWidget(reset)
+        layout.addWidget(title)
+        layout.addWidget(desc)
+        layout.addWidget(self.hotkey_value)
+        layout.addWidget(self.hotkey_editor)
+        layout.addWidget(self.hotkey_status)
+        layout.addLayout(row)
+        return card
+
     def _save_card(self):
         card = QFrame()
         card.setObjectName("moduleCard")
@@ -173,6 +230,9 @@ class SettingsPage(QWidget):
             self.click_threshold_value.setText(
                 f"连续互动气泡阈值：{self.store.settings.get('pat_multi_click_talk_threshold', 6)} 次"
             )
+        if self.hotkey_value:
+            hotkey = self.get_hotkey() or DEFAULT_HOTKEY
+            self.hotkey_value.setText(f"当前显示 / 隐藏快捷键：{hotkey}")
 
     def _preview_scale(self, value):
         self.scale_value.setText(f"当前比例：{value}%")
@@ -227,6 +287,29 @@ class SettingsPage(QWidget):
     def _save_click_threshold(self):
         self.store.set_setting("pat_multi_click_talk_threshold", int(self.click_threshold_slider.value()))
 
+    def _fallback_set_hotkey(self, hotkey):
+        self.store.set_setting("pet_toggle_hotkey", hotkey)
+        return True, f"快捷键已保存为 {hotkey}。"
+
+    def _editor_hotkey_text(self):
+        sequence = self.hotkey_editor.keySequence()
+        if sequence.isEmpty():
+            return ""
+        return sequence.toString(QKeySequence.SequenceFormat.PortableText)
+
+    def _save_hotkey(self):
+        hotkey = self._editor_hotkey_text()
+        ok, message = self.set_hotkey(hotkey)
+        self.hotkey_status.setText(message)
+        if ok:
+            current = self.get_hotkey() or hotkey
+            self.hotkey_editor.setKeySequence(QKeySequence(current))
+            self.refresh()
+
+    def _reset_hotkey(self):
+        self.hotkey_editor.setKeySequence(QKeySequence(DEFAULT_HOTKEY))
+        self._save_hotkey()
+
     def _save_settings(self):
         self.store.save()
         self.store.add_log("设置", "当前设置已保存。")
@@ -245,6 +328,8 @@ class SettingsPage(QWidget):
         self.pet_window.setWindowOpacity(1.0)
         self.pet_window.set_always_on_top(True)
         self.pet_window.set_edge_snap(True, 48)
+        self.hotkey_editor.setKeySequence(QKeySequence(DEFAULT_HOTKEY))
+        self.set_hotkey(DEFAULT_HOTKEY)
         self.scale_slider.setValue(50)
         self.opacity_slider.setValue(100)
         self.edge_threshold_slider.setValue(48)
@@ -301,6 +386,14 @@ QSlider::handle:horizontal {
 }
 #moduleAction:hover {
     background: #ffd374;
+}
+QKeySequenceEdit#hotkeyEditor {
+    min-height: 38px;
+    color: #284f66;
+    background: #ffffff;
+    border: 1px solid #b8e1ef;
+    border-radius: 12px;
+    padding: 6px 10px;
 }
 QLabel {
     color: #31556b;
