@@ -241,8 +241,12 @@ class PolarBearPetWindow(QWidget):
         for action in self._actions.values():
             if not action.frames:
                 continue
-            source_frames = action.source_frames or action.frames
-            action.frames = self._scale_frames(source_frames)
+            if action.frame_paths:
+                action.frames = []
+                action.source_frames = []
+            else:
+                source_frames = action.source_frames or action.frames
+                action.frames = self._scale_frames(source_frames)
         self._rebuild_return_transitions()
         self._frame_bounds_cache.clear()
         self._warm_frame_cache()
@@ -433,6 +437,26 @@ class PolarBearPetWindow(QWidget):
     def _scale_frames(self, frames):
         return [self._scale_pixmap(frame) for frame in frames]
 
+    def _target_frame_pixel_size(self, source_size=None):
+        logical_size = self._pet_draw_rect.size().toSize()
+        dpr = max(1.0, self.devicePixelRatioF())
+        bounds = QSize(max(1, round(logical_size.width() * dpr)), max(1, round(logical_size.height() * dpr)))
+        if source_size and source_size.isValid():
+            return source_size.scaled(bounds, Qt.KeepAspectRatio)
+        return bounds
+
+    def _load_scaled_frame_path(self, file):
+        reader = QImageReader(str(file))
+        target_size = self._target_frame_pixel_size(reader.size())
+        if target_size.isValid():
+            reader.setScaledSize(target_size)
+        image = reader.read()
+        if image.isNull():
+            return QPixmap()
+        pixmap = QPixmap.fromImage(image)
+        pixmap.setDevicePixelRatio(max(1.0, self.devicePixelRatioF()))
+        return pixmap
+
     def _ensure_action_loaded(self, action_name):
         action = self._actions.get(action_name)
         if not action:
@@ -442,17 +466,16 @@ class PolarBearPetWindow(QWidget):
         if not action.frame_paths:
             return None
 
-        source_frames = []
+        scaled_frames = []
         for file in action.frame_paths:
-            pixmap = QPixmap(str(file))
+            pixmap = self._load_scaled_frame_path(file)
             if not pixmap.isNull():
-                source_frames.append(pixmap)
-        if not source_frames:
+                scaled_frames.append(pixmap)
+        if not scaled_frames:
             return None
 
-        repeated_source_frames = source_frames * max(1, int(action.repeat or 1))
-        action.source_frames = repeated_source_frames
-        action.frames = self._scale_frames(repeated_source_frames)
+        action.source_frames = []
+        action.frames = scaled_frames * max(1, int(action.repeat or 1))
         return action
 
     def _action_has_frames(self, action):
@@ -474,17 +497,20 @@ class PolarBearPetWindow(QWidget):
         self._deferred_load_queue = [name for name in priorities if name in self._actions and name != self._action_name]
         self._deferred_loading = bool(self._deferred_load_queue)
         if self._deferred_loading:
-            QTimer.singleShot(450, self._load_next_deferred_action)
+            QTimer.singleShot(700, self._load_next_deferred_action)
 
     def _load_next_deferred_action(self):
         if not self._deferred_load_queue:
             self._deferred_loading = False
             return
+        if self._is_dragging or self._action_name not in {"idle", "__transition__"}:
+            QTimer.singleShot(520, self._load_next_deferred_action)
+            return
         action_name = self._deferred_load_queue.pop(0)
         if self.isVisible() and action_name != self._action_name:
             self._ensure_action_loaded(action_name)
             self._rebuild_return_transitions()
-        delay = 180 if self._deferred_load_queue else 0
+        delay = 420 if self._deferred_load_queue else 0
         if delay:
             QTimer.singleShot(delay, self._load_next_deferred_action)
         else:
