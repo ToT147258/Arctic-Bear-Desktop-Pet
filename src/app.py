@@ -592,6 +592,7 @@ class PolarBearPetApp(QMainWindow):
         self._metric_bar_animations = {}
         self._page_transition = None
         self._did_initial_page_show = False
+        self._pet_user_hidden = False
         self._touch_burst_count = 0
         self._touch_burst_timer = QTimer(self)
         self._touch_burst_timer.setSingleShot(True)
@@ -778,7 +779,7 @@ class PolarBearPetApp(QMainWindow):
         actions = QVBoxLayout()
         actions.setSpacing(10)
         show_pet = QPushButton("唤出桌宠")
-        show_pet.clicked.connect(self.toggle_pet_window)
+        show_pet.clicked.connect(self.show_pet_window)
         show_pet.setObjectName("primaryAction")
         interact = QPushButton("互动反应")
         interact.setObjectName("heroAction")
@@ -1118,9 +1119,7 @@ class PolarBearPetApp(QMainWindow):
         self._play_pet_action("touch", "触发互动，心情提升；好感收益按今日次数递减。")
 
     def _play_pet_action(self, action_name, bubble=None):
-        if not self.pet_window.isVisible():
-            self.pet_window.show()
-        self.pet_window.raise_()
+        self.show_pet_window()
         if action_name == "edge_left":
             self.pet_window.stick_to_edge("left")
         elif action_name == "edge_right":
@@ -1136,8 +1135,7 @@ class PolarBearPetApp(QMainWindow):
             self._show_console()
             return
         if action_name == "hide_pet":
-            self._save_pet_position()
-            self.pet_window.hide()
+            self.hide_pet_window()
             return
         if action_name == "quit_app":
             QApplication.instance().quit()
@@ -1214,8 +1212,12 @@ class PolarBearPetApp(QMainWindow):
         menu = QMenu()
         show_console = QAction("显示控制台", self)
         show_console.triggered.connect(self._show_console)
+        show_pet = QAction("唤出桌宠", self)
+        show_pet.triggered.connect(self.show_pet_window)
         toggle_pet = QAction("显示 / 隐藏桌宠", self)
         toggle_pet.triggered.connect(self.toggle_pet_window)
+        hide_pet = QAction("隐藏桌宠", self)
+        hide_pet.triggered.connect(self.hide_pet_window)
         feed = QAction("投喂小鱼", self)
         feed.triggered.connect(lambda: self._feed_from_tray("fish"))
         focus = QAction("开始 25 分钟专注", self)
@@ -1227,7 +1229,7 @@ class PolarBearPetApp(QMainWindow):
         quit_action = QAction("退出", self)
         quit_action.triggered.connect(QApplication.instance().quit)
 
-        for action in (show_console, toggle_pet, feed, focus, cancel_focus, rest):
+        for action in (show_console, show_pet, toggle_pet, hide_pet, feed, focus, cancel_focus, rest):
             menu.addAction(action)
         menu.addSeparator()
         menu.addAction(quit_action)
@@ -1242,7 +1244,10 @@ class PolarBearPetApp(QMainWindow):
 
     def _handle_tray_activated(self, reason):
         if reason == QSystemTrayIcon.Trigger:
-            self._show_console()
+            if self.pet_window.isVisible():
+                self._show_console()
+            else:
+                self.show_pet_window()
 
     def _feed_from_tray(self, item_id):
         ok, message = self.store.feed(item_id)
@@ -1382,9 +1387,25 @@ class PolarBearPetApp(QMainWindow):
         self.store.settings["pet_window_y"] = int(self.pet_window.y())
 
     def _show_pet_on_startup(self):
-        self._restore_pet_position()
-        if not self.pet_window.isVisible():
-            self.pet_window.show()
+        self.show_pet_window(restore=True)
+
+    def show_pet_window(self, checked=False, restore=True):
+        was_visible = self.pet_window.isVisible()
+        if restore and not was_visible:
+            self._restore_pet_position()
+        if self.pet_window.isMinimized():
+            self.pet_window.showNormal()
+        self.pet_window.show()
+        self.pet_window.raise_()
+        self.pet_window.activateWindow()
+        self.pet_window.update()
+        self._pet_user_hidden = False
+
+    def hide_pet_window(self, checked=False):
+        if self.pet_window.isVisible():
+            self._save_pet_position()
+        self.pet_window.hide()
+        self._pet_user_hidden = True
 
     def closeEvent(self, event):
         self._save_pet_position()
@@ -1393,13 +1414,10 @@ class PolarBearPetApp(QMainWindow):
         super().closeEvent(event)
 
     def toggle_pet_window(self):
-        if self.pet_window.isVisible():
-            self._save_pet_position()
-            self.pet_window.hide()
+        if self.pet_window.isVisible() and not self._pet_user_hidden:
+            self.hide_pet_window()
         else:
-            self._restore_pet_position()
-            self.pet_window.show()
-            self.pet_window.raise_()
+            self.show_pet_window()
 
 
 APP_STYLE = """
