@@ -124,8 +124,8 @@ class ChatPage(QWidget):
             return f"下一条提醒是 {course_time}《{course_title}》，地点在 {course_location}。我会陪你记着。", "wave"
         if "饿" in text or "吃" in text:
             if int(stats.get("hunger", 0)) < 55:
-                return "我有点想吃小鱼了，可以去外观装扮页给我准备一点。", "touch"
-            return "现在还不饿，先把小鱼留着，金币也要省一点。", "idle"
+                return "我有点想吃极地鱼干了，可以去外观装扮页给我准备一点。", "touch"
+            return "现在还不饿，先把鱼干留着，金币也要省一点。", "idle"
         if "累" in text or "休息" in text or int(stats.get("energy", 0)) < 35:
             return "那我们短休一下吧，恢复体力比硬撑更重要。", "sleep"
         if "摸" in text or "pat" in lowered:

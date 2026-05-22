@@ -32,6 +32,8 @@ class FrameAction:
     label: str
     frames: list[QPixmap]
     source_frames: list[QPixmap] = field(default_factory=list)
+    frame_paths: list[Path] = field(default_factory=list)
+    repeat: int = 1
     interval: int = 80
     loop: bool = False
     move_x: float = 0.0
@@ -66,8 +68,8 @@ class PolarBearPetWindow(QWidget):
         self.role_root = self.asset_root / "role" / "PolarBear"
         self.real_action_root = self.asset_root / "real_actions"
         self.pet_conf_path = self.role_root / "pet_conf.json"
-        self._base_window_size = (420, 600)
-        self._base_draw_rect = QRectF(30, 60, 360, 520)
+        self._base_window_size = (420, 660)
+        self._base_draw_rect = QRectF(30, 118, 360, 520)
         self._walk_visual_padding = 0
         self._content_width = 0
         self._content_height = 0
@@ -101,13 +103,17 @@ class PolarBearPetWindow(QWidget):
         self._edge_snap_enabled = True
         self._edge_snap_threshold = 48
         self._edge_stick_side = None
+        self._deferred_load_queue = []
+        self._deferred_loading = False
 
         self._fallback_source_pixmap = QPixmap(str(self.asset_root / "polar-bear-realistic.png"))
         self.fallback_pixmap = self._scale_pixmap(self._fallback_source_pixmap)
         self._load_actions()
+        self._ensure_action_loaded("idle")
         self._load_random_action_pool()
         self._rebuild_return_transitions()
         self._warm_frame_cache()
+        self._start_deferred_action_loading()
 
         self._clock = QElapsedTimer()
         self._clock.start()
@@ -233,6 +239,8 @@ class PolarBearPetWindow(QWidget):
     def _rescale_pixmaps(self):
         self.fallback_pixmap = self._scale_pixmap(self._fallback_source_pixmap)
         for action in self._actions.values():
+            if not action.frames:
+                continue
             source_frames = action.source_frames or action.frames
             action.frames = self._scale_frames(source_frames)
         self._rebuild_return_transitions()
@@ -298,24 +306,15 @@ class PolarBearPetWindow(QWidget):
 
         act_conf = json.loads(act_conf_path.read_text(encoding="utf-8-sig"))
         actions = {}
-        frame_cache = {}
-        scaled_frame_cache = {}
+        frame_path_cache = {}
         for action_name, action_conf in act_conf.items():
             image_prefix = action_conf.get("images", action_name)
-            if image_prefix not in frame_cache:
-                frame_cache[image_prefix] = self._load_prefixed_frames(action_root, image_prefix)
-            source_frames = frame_cache[image_prefix]
-            if not source_frames:
+            if image_prefix not in frame_path_cache:
+                frame_path_cache[image_prefix] = self._prefixed_frame_paths(action_root, image_prefix)
+            frame_paths = frame_path_cache[image_prefix]
+            if not frame_paths:
                 continue
             act_num = int(action_conf.get("act_num", 1))
-            cache_key = (image_prefix, act_num)
-            if cache_key not in scaled_frame_cache:
-                repeated_source_frames = source_frames * act_num
-                scaled_frame_cache[cache_key] = (
-                    repeated_source_frames,
-                    self._scale_frames(repeated_source_frames),
-                )
-            repeated_source_frames, scaled_frames = scaled_frame_cache[cache_key]
             interval = int(float(action_conf.get("frame_refresh", 0.08)) * 1000)
             move_x = 0
             if action_conf.get("need_move"):
@@ -330,8 +329,10 @@ class PolarBearPetWindow(QWidget):
             actions[action_name] = FrameAction(
                 name=action_name,
                 label=ACTION_LABELS.get(action_name, action_name),
-                frames=list(scaled_frames),
-                source_frames=list(repeated_source_frames),
+                frames=[],
+                source_frames=[],
+                frame_paths=list(frame_paths),
+                repeat=max(1, act_num),
                 interval=interval,
                 loop=bool(action_conf.get("loop", action_name == "default")),
                 move_x=move_x,
@@ -364,16 +365,18 @@ class PolarBearPetWindow(QWidget):
                 normalized[target_name] = action
         return normalized
 
-    def _load_prefixed_frames(self, action_root, image_prefix):
+    def _prefixed_frame_paths(self, action_root, image_prefix):
         frame_pattern = re.compile(rf"^{re.escape(image_prefix)}_(\d+)\.png$", re.IGNORECASE)
         files = []
         for file in action_root.glob(f"{image_prefix}_*.png"):
             match = frame_pattern.match(file.name)
             if match:
                 files.append((int(match.group(1)), file))
-        files = [file for _, file in sorted(files)]
+        return [file for _, file in sorted(files)]
+
+    def _load_prefixed_frames(self, action_root, image_prefix):
         frames = []
-        for file in files:
+        for file in self._prefixed_frame_paths(action_root, image_prefix):
             pixmap = QPixmap(str(file))
             if not pixmap.isNull():
                 frames.append(pixmap)
@@ -430,10 +433,68 @@ class PolarBearPetWindow(QWidget):
     def _scale_frames(self, frames):
         return [self._scale_pixmap(frame) for frame in frames]
 
+    def _ensure_action_loaded(self, action_name):
+        action = self._actions.get(action_name)
+        if not action:
+            return None
+        if action.frames:
+            return action
+        if not action.frame_paths:
+            return None
+
+        source_frames = []
+        for file in action.frame_paths:
+            pixmap = QPixmap(str(file))
+            if not pixmap.isNull():
+                source_frames.append(pixmap)
+        if not source_frames:
+            return None
+
+        repeated_source_frames = source_frames * max(1, int(action.repeat or 1))
+        action.source_frames = repeated_source_frames
+        action.frames = self._scale_frames(repeated_source_frames)
+        return action
+
+    def _action_has_frames(self, action):
+        return bool(action and (action.frames or action.frame_paths))
+
+    def _start_deferred_action_loading(self):
+        priorities = [
+            "touch",
+            "wave",
+            "walk_left",
+            "walk_right",
+            "jump",
+            "drag",
+            "sleep_prepare",
+            "sleep",
+            "edge_left",
+            "edge_right",
+        ]
+        self._deferred_load_queue = [name for name in priorities if name in self._actions and name != self._action_name]
+        self._deferred_loading = bool(self._deferred_load_queue)
+        if self._deferred_loading:
+            QTimer.singleShot(450, self._load_next_deferred_action)
+
+    def _load_next_deferred_action(self):
+        if not self._deferred_load_queue:
+            self._deferred_loading = False
+            return
+        action_name = self._deferred_load_queue.pop(0)
+        if self.isVisible() and action_name != self._action_name:
+            self._ensure_action_loaded(action_name)
+            self._rebuild_return_transitions()
+        delay = 180 if self._deferred_load_queue else 0
+        if delay:
+            QTimer.singleShot(delay, self._load_next_deferred_action)
+        else:
+            self._deferred_loading = False
+
     def _warm_frame_cache(self):
         warm_frames = []
-        for action in self._actions.values():
-            warm_frames.extend(action.frames)
+        action = self._current_action()
+        if action:
+            warm_frames.extend(action.frames[:8])
         if self._transition_action:
             warm_frames.extend(self._transition_action.frames)
 
@@ -550,7 +611,7 @@ class PolarBearPetWindow(QWidget):
     def _current_action(self):
         if self._action_name == "__transition__":
             return self._transition_action
-        return self._actions.get(self._action_name) or self._actions.get("idle")
+        return self._ensure_action_loaded(self._action_name) or self._ensure_action_loaded("idle")
 
     def _start_frame_index(self, action_name, requested_index, action):
         if requested_index:
@@ -665,12 +726,12 @@ class PolarBearPetWindow(QWidget):
 
     def _rebuild_return_transitions(self):
         self._return_transitions = {}
-        idle = self._actions.get("idle")
+        idle = self._ensure_action_loaded("idle")
         if not idle or not idle.frames:
             return
 
         for source_name, source_action in self._actions.items():
-            if source_name in {"idle", "blink", "sleep_prepare", "edge_left", "edge_right"} or not source_action.frames:
+            if source_name in {"idle", "blink", "sleep_prepare", "edge_left", "edge_right"} or not self._action_has_frames(source_action):
                 continue
             target_frame_index = self._idle_return_frame_hint(source_name) % len(idle.frames)
             frames = self._step_frames(idle.frames, target_frame_index, 7)
@@ -718,6 +779,9 @@ class PolarBearPetWindow(QWidget):
             self._commit_walk_visual_offset(force=True)
         if transition and action_name == "sleep" and "sleep_prepare" in self._actions:
             action_name = "sleep_prepare"
+        action = self._ensure_action_loaded(action_name)
+        if not action or not action.frames:
+            return
         if transition and action_name == "idle" and self._action_name not in {"idle", "__transition__"}:
             if self._start_return_transition(self._action_name):
                 return
@@ -725,7 +789,6 @@ class PolarBearPetWindow(QWidget):
             self._ensure_walk_headroom(action_name)
         self._transition_action = None
         self._action_name = action_name
-        action = self._actions[action_name]
         self._frame_index = self._start_frame_index(action_name, start_frame_index, action)
         self._cycle_count = 0
         self._walk_frame_count = 0
@@ -746,7 +809,7 @@ class PolarBearPetWindow(QWidget):
         self._drag_hold_frame = QPixmap(frame) if frame and not frame.isNull() else None
         self._transition_action = None
         self._action_name = "idle"
-        idle = self._actions.get("idle")
+        idle = self._ensure_action_loaded("idle")
         if idle and idle.frames:
             self._frame_index = self._idle_return_frame_hint("drag") % len(idle.frames)
         else:
@@ -776,7 +839,7 @@ class PolarBearPetWindow(QWidget):
             return False
 
         current_action = self._current_action()
-        next_action = self._actions.get(next_name)
+        next_action = self._ensure_action_loaded(next_name)
         if not current_action or not next_action or not next_action.frames:
             return False
 
@@ -1141,34 +1204,26 @@ class PolarBearPetWindow(QWidget):
 
     def _draw_bubble(self, painter, content_left):
         scale = self._scale
-        margin = max(6, round(12 * scale))
+        margin = max(7, round(14 * scale))
         pet_rect = self._visible_pet_rect()
-        preferred_width = max(150, round(240 * scale))
+        preferred_width = max(168, round(250 * scale))
         preferred_width = min(preferred_width, max(120, self.width() - margin * 2))
         min_width = max(112, round(132 * scale))
-        left_space = max(0, pet_rect.left() - margin * 2)
-        right_space = max(0, self.width() - pet_rect.right() - margin * 2)
+        content_right = content_left + self._content_width
+        content_left_bound = max(margin, content_left + round(10 * scale))
+        content_right_bound = min(self.width() - margin, content_right - round(10 * scale))
+        if content_right_bound - content_left_bound < min_width:
+            content_left_bound = margin
+            content_right_bound = self.width() - margin
 
-        if self._edge_stick_side == "left" and right_space >= min_width:
-            bubble_width = min(preferred_width, right_space)
+        bubble_width = min(preferred_width, max(min_width, content_right_bound - content_left_bound))
+        if self._edge_stick_side == "left":
             bubble_x = pet_rect.right() + margin
-        elif self._edge_stick_side == "right" and left_space >= min_width:
-            bubble_width = min(preferred_width, left_space)
+        elif self._edge_stick_side == "right":
             bubble_x = pet_rect.left() - margin - bubble_width
-        elif max(left_space, right_space) >= min_width:
-            bubble_width = min(preferred_width, max(left_space, right_space))
-            if left_space >= right_space:
-                bubble_x = pet_rect.left() - margin - bubble_width
-            else:
-                bubble_x = pet_rect.right() + margin
         else:
-            bubble_width = min(
-                max(min_width, self._content_width - round(48 * scale)),
-                self.width() - margin * 2,
-            )
-            bubble_x = content_left + (self._content_width - bubble_width) / 2
-
-        bubble_x = max(margin, min(self.width() - bubble_width - margin, bubble_x))
+            bubble_x = pet_rect.center().x() - bubble_width / 2
+        bubble_x = max(content_left_bound, min(content_right_bound - bubble_width, bubble_x))
 
         text_margin = max(8, round(10 * scale))
         text_width = max(1, bubble_width - text_margin * 2)
@@ -1179,14 +1234,14 @@ class PolarBearPetWindow(QWidget):
         )
         bubble_height = max(max(38, round(48 * scale)), math.ceil(measured.height()) + text_margin * 2)
         bubble_height = min(bubble_height, max(76, round(96 * scale)))
-        min_y = max(4, round(8 * scale))
+        min_y = max(5, round(10 * scale))
         max_y = self.height() - bubble_height - max(14, round(44 * scale))
         if self._edge_stick_side in {"left", "right"}:
-            target_y = pet_rect.top() + round(18 * scale)
+            target_y = min_y
         else:
             target_y = pet_rect.top() - bubble_height - margin
             if target_y < min_y:
-                target_y = pet_rect.bottom() + margin
+                target_y = min_y
         bubble_y = max(min_y, min(target_y, max_y))
 
         bubble_rect = QRectF(
@@ -1197,17 +1252,14 @@ class PolarBearPetWindow(QWidget):
         )
         if bubble_rect.intersects(pet_rect):
             above_y = pet_rect.top() - bubble_height - margin
-            below_y = pet_rect.bottom() + margin
             if above_y >= min_y:
                 bubble_y = above_y
-            elif below_y <= max_y:
-                bubble_y = below_y
             else:
                 bubble_y = min_y
             bubble_rect.moveTop(max(min_y, min(bubble_y, max_y)))
 
-        painter.setPen(QPen(QColor(126, 232, 255), max(1, round(2 * scale))))
-        painter.setBrush(QColor(12, 24, 38, 228))
+        painter.setPen(QPen(QColor(126, 232, 255, 230), max(1, round(2 * scale))))
+        painter.setBrush(QColor(15, 42, 62, 232))
         painter.drawRoundedRect(bubble_rect, max(8, round(12 * scale)), max(8, round(12 * scale)))
         painter.setPen(QColor(235, 250, 255))
         painter.drawText(

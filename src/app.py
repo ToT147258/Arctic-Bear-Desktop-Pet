@@ -682,6 +682,7 @@ class PolarBearPetApp(QMainWindow):
         self._panel_animations = []
         self._metric_bar_animations = {}
         self._page_transition = None
+        self._page_factories = {}
         self._did_initial_page_show = False
         self._pet_user_hidden = False
         self._pet_hotkey_text = (
@@ -733,14 +734,20 @@ class PolarBearPetApp(QMainWindow):
         self.stack.setMinimumSize(0, 0)
         self.stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         pages = [
-            ("宠物状态", self._build_overview_page()),
-            ("课程提醒", self._scroll_module_page(NotificationPage(self.store, self.pet_window))),
-            ("动作管理", self._scroll_module_page(InteractionPage(self.pet_window, self.store, self._play_pet_action, self.toggle_pet_window))),
-            ("聊天互动", self._scroll_module_page(ChatPage(self.store, self.pet_window, self._play_pet_action))),
-            ("外观装扮", BackpackPage(self.store, self._play_pet_action)),
+            ("宠物状态", self._build_overview_page, True),
+            ("课程提醒", lambda: self._scroll_module_page(NotificationPage(self.store, self.pet_window)), False),
+            (
+                "动作管理",
+                lambda: self._scroll_module_page(
+                    InteractionPage(self.pet_window, self.store, self._play_pet_action, self.toggle_pet_window)
+                ),
+                False,
+            ),
+            ("聊天互动", lambda: self._scroll_module_page(ChatPage(self.store, self.pet_window, self._play_pet_action)), False),
+            ("外观装扮", lambda: BackpackPage(self.store, self._play_pet_action), False),
             (
                 "系统设置",
-                self._scroll_module_page(
+                lambda: self._scroll_module_page(
                     SettingsPage(
                         self.store,
                         self.pet_window,
@@ -748,16 +755,22 @@ class PolarBearPetApp(QMainWindow):
                         self.set_pet_toggle_hotkey,
                     )
                 ),
+                False,
             ),
         ]
 
-        for index, (name, page) in enumerate(pages):
+        for index, (name, factory, eager) in enumerate(pages):
             button = QPushButton(name)
             button.setCursor(Qt.PointingHandCursor)
             button.setProperty("nav", True)
             button.clicked.connect(lambda checked=False, i=index: self._switch_page(i))
             self.nav_buttons.append(button)
             sidebar.layout().addWidget(button)
+            if eager:
+                page = factory()
+            else:
+                page = self._lazy_module_placeholder(name)
+                self._page_factories[index] = factory
             self.stack.addWidget(page)
 
         sidebar.layout().addStretch()
@@ -781,6 +794,33 @@ class PolarBearPetApp(QMainWindow):
         page.setMinimumHeight(page.minimumSizeHint().height())
         scroll.setWidget(page)
         return scroll
+
+    def _lazy_module_placeholder(self, name):
+        placeholder = QFrame()
+        placeholder.setObjectName("lazyModulePlaceholder")
+        layout = QVBoxLayout(placeholder)
+        layout.setContentsMargins(34, 30, 34, 30)
+        layout.setSpacing(10)
+        title = QLabel(f"{name}正在准备")
+        title.setObjectName("pageTitle")
+        note = QLabel("第一次打开时会加载对应模块资源，之后切换会直接复用。")
+        note.setObjectName("pageDescription")
+        note.setWordWrap(True)
+        layout.addWidget(title)
+        layout.addWidget(note)
+        layout.addStretch()
+        return placeholder
+
+    def _ensure_stack_page(self, index):
+        factory = self._page_factories.get(index)
+        if not factory:
+            return
+        old_widget = self.stack.widget(index)
+        page = factory()
+        self.stack.removeWidget(old_widget)
+        old_widget.deleteLater()
+        self.stack.insertWidget(index, page)
+        self._page_factories[index] = None
 
     def _build_sidebar(self):
         sidebar = QWidget()
@@ -919,7 +959,7 @@ class PolarBearPetApp(QMainWindow):
         metrics.setSpacing(12)
         metric_data = [
             ("mood", "心情值", "0%", "轻触互动可提升心情", 0),
-            ("hunger", "饱食度", "0%", "投喂小鱼和牛奶恢复", 0),
+            ("hunger", "饱食度", "0%", "投喂鱼干和热牛奶恢复", 0),
             ("energy", "活跃度", "0%", "睡觉和短休可恢复", 0),
         ]
         for index, item in enumerate(metric_data):
@@ -1200,6 +1240,7 @@ class PolarBearPetApp(QMainWindow):
         return panel
 
     def _switch_page(self, index):
+        self._ensure_stack_page(index)
         self.stack.setCurrentIndex(index)
         page = self.stack.currentWidget()
         if page and self._did_initial_page_show and not isinstance(page, QScrollArea):
@@ -1286,7 +1327,7 @@ class PolarBearPetApp(QMainWindow):
             [
                 "我在，我在，别急。",
                 "今天的互动量达标了。",
-                "再摸就要收小鱼了。",
+                "再摸就要收极地鱼干了。",
                 "收到，陪伴信号很强。",
             ]
         )
@@ -1329,7 +1370,7 @@ class PolarBearPetApp(QMainWindow):
         toggle_pet.triggered.connect(self.toggle_pet_window)
         hide_pet = QAction("隐藏桌宠", self)
         hide_pet.triggered.connect(self.hide_pet_window)
-        feed = QAction("投喂小鱼", self)
+        feed = QAction("投喂极地鱼干", self)
         feed.triggered.connect(lambda: self._feed_from_tray("fish"))
         focus = QAction("开始 25 分钟专注", self)
         focus.triggered.connect(self._start_focus_from_tray)
@@ -1659,6 +1700,18 @@ QScrollArea#sidebarScroll > QWidget {
 }
 #overviewPage {
     background: transparent;
+}
+#lazyModulePlaceholder {
+    background: transparent;
+}
+#lazyModulePlaceholder #pageTitle {
+    color: #23506a;
+    font-size: 28px;
+    font-weight: 900;
+}
+#lazyModulePlaceholder #pageDescription {
+    color: #668497;
+    font-size: 14px;
 }
 #topTitleBar, #actionDock, #rightReminderPanel, #statusFooter {
     background: rgba(255, 255, 255, 210);

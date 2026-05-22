@@ -14,15 +14,15 @@ WEEKDAY_INDEX = {name: index for index, name in enumerate(WEEKDAY_ORDER)}
 
 ITEM_CATALOG = {
     "fish": {
-        "name": "小鱼",
+        "name": "极地鱼干",
         "type": "food",
         "price": 34,
         "effects": {"hunger": 16, "mood": 2},
         "image": "assets/shop/items/fish.png",
-        "description": "稳定的基础食物，主要恢复饱食度。",
+        "description": "低温风干的基础补给，口感清爽，主要恢复饱食度。",
     },
     "milk": {
-        "name": "牛奶",
+        "name": "暖绒热牛奶",
         "type": "food",
         "price": 32,
         "effects": {"hunger": 8, "energy": 7},
@@ -32,10 +32,10 @@ ITEM_CATALOG = {
             "expiration": 300,
             "description": "5 分钟内饱食度不会自然下降。",
         },
-        "description": "温和恢复体力，适合睡醒后补充。",
+        "description": "带一点奶香的热饮，温和恢复体力，适合睡醒后补充。",
     },
     "berry_cake": {
-        "name": "蓝莓蛋糕",
+        "name": "蓝莓冰雪蛋糕",
         "type": "food",
         "price": 58,
         "effects": {"hunger": 10, "mood": 10, "affection": 1},
@@ -45,10 +45,10 @@ ITEM_CATALOG = {
             "expiration": 240,
             "description": "4 分钟内心情不会自然下降。",
         },
-        "description": "小奖励食物，提升心情和好感。",
+        "description": "柔软的甜点奖励，提升心情和好感。",
     },
     "snowball": {
-        "name": "雪球玩具",
+        "name": "绒绒雪球",
         "type": "toy",
         "price": 70,
         "effects": {"mood": 12, "affection": 1, "energy": -4},
@@ -60,23 +60,23 @@ ITEM_CATALOG = {
             "expiration": 180,
             "description": "3 分钟内每 45 秒获得 2 金币。",
         },
-        "description": "互动玩具，适合触发玩耍动作。",
+        "description": "轻软的互动玩具，适合触发玩耍动作。",
     },
     "scarf": {
-        "name": "围巾",
+        "name": "雪花围巾",
         "type": "gift",
         "price": 110,
         "effects": {"affection": 4, "mood": 3},
         "image": "assets/shop/items/scarf.png",
-        "description": "珍贵礼物，适合用在好感阶段推进时。",
+        "description": "柔软的珍贵礼物，适合用在好感阶段推进时。",
     },
     "ice": {
-        "name": "冰块",
+        "name": "晶透冰块",
         "type": "food",
         "price": 16,
         "effects": {"hunger": 3, "mood": 1},
         "image": "assets/shop/items/ice.png",
-        "description": "便宜的小零食，适合轻量投喂。",
+        "description": "清爽的小零食，适合轻量投喂和低成本补给。",
     },
 }
 
