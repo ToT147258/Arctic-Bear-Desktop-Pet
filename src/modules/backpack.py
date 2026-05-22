@@ -145,7 +145,7 @@ class BackpackPage(QWidget):
         image = QLabel()
         image.setObjectName("itemImage")
         image.setAlignment(Qt.AlignCenter)
-        pixmap = self._item_pixmap(item, 188, 128)
+        pixmap = self._item_pixmap(item, 260, 164)
         if not pixmap.isNull():
             image.setPixmap(pixmap)
 
@@ -251,7 +251,7 @@ class BackpackPage(QWidget):
 
     def _sync_showcase(self):
         item = ITEM_CATALOG[self.selected_item_id]
-        pixmap = self._item_pixmap(item, 220, 166)
+        pixmap = self._item_pixmap(item, 300, 218)
         if not pixmap.isNull():
             self.showcase_image.setPixmap(pixmap)
         self.showcase_name.setText(item["name"])
@@ -353,10 +353,10 @@ PAGE_STYLE = """
     border-radius: 8px;
 }
 #showcaseImage {
-    min-width: 250px;
-    max-width: 260px;
-    min-height: 190px;
-    max-height: 198px;
+    min-width: 318px;
+    max-width: 328px;
+    min-height: 232px;
+    max-height: 242px;
     background: qradialgradient(cx:0.5, cy:0.62, radius:0.74,
         fx:0.46, fy:0.48, stop:0 #ffffff, stop:0.52 #f2fbff, stop:1 #e5f7ff);
     border: 1px solid #b5e7f5;
@@ -390,8 +390,8 @@ PAGE_STYLE = """
     font-size: 14px;
 }
 #itemImage {
-    min-height: 142px;
-    max-height: 142px;
+    min-height: 174px;
+    max-height: 174px;
     background: qradialgradient(cx:0.5, cy:0.58, radius:0.8,
         stop:0 #ffffff, stop:0.62 #f4fbff, stop:1 #e7f8ff);
     border: 1px solid #bdeaf5;
