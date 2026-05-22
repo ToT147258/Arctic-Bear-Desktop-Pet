@@ -21,6 +21,7 @@ tmp_video_edge_sheets/
 tmp_*.png
 data/save.json
 data/*.json
+data/*.tmp
 data/*.png
 data/test-*.json
 tools/__pycache__/

@@ -21,10 +21,12 @@ class StatusPage(QWidget):
         self.play_action = play_action
         self.progress_bars = {}
         self.task_buttons = {}
+        self.task_progress_labels = {}
         self.level_label = None
         self.exp_bar = None
         self.companion_bar = None
         self.buff_label = None
+        self.level_profile_label = None
         self.affection_profile_label = None
         self.daily_counts_label = None
         self._build_ui()
@@ -74,8 +76,9 @@ class StatusPage(QWidget):
 
         profile_grid = QGridLayout()
         profile_grid.setSpacing(12)
-        profile_grid.addWidget(self._profile_card("好感档案"), 0, 0)
-        profile_grid.addWidget(self._daily_card("今日行为"), 0, 1)
+        profile_grid.addWidget(self._level_card("等级档案"), 0, 0, 1, 2)
+        profile_grid.addWidget(self._profile_card("好感档案"), 1, 0)
+        profile_grid.addWidget(self._daily_card("今日行为"), 1, 1)
         layout.addLayout(profile_grid)
 
         stat_grid = QGridLayout()
@@ -91,7 +94,6 @@ class StatusPage(QWidget):
             ("恢复体力", self._rest),
             ("今日关怀", self._daily_care),
             ("亲近互动", self._touch),
-            ("重置每日任务", self.store.reset_daily_tasks),
         ]
         for index, (label, callback) in enumerate(action_items):
             button = QPushButton(label)
@@ -148,6 +150,19 @@ class StatusPage(QWidget):
         layout.addWidget(self.affection_profile_label)
         return card
 
+    def _level_card(self, title):
+        card = QFrame()
+        card.setObjectName("moduleCard")
+        layout = QVBoxLayout(card)
+        heading = QLabel(title)
+        heading.setObjectName("cardTitle")
+        self.level_profile_label = QLabel()
+        self.level_profile_label.setWordWrap(True)
+        self.level_profile_label.setObjectName("taskItem")
+        layout.addWidget(heading)
+        layout.addWidget(self.level_profile_label)
+        return card
+
     def _daily_card(self, title):
         card = QFrame()
         card.setObjectName("moduleCard")
@@ -169,13 +184,17 @@ class StatusPage(QWidget):
         title.setObjectName("cardTitle")
         reward = QLabel(f"奖励：{task['reward']} 金币 / {task['exp']} 经验")
         reward.setObjectName("taskItem")
-        button = QPushButton("完成任务")
+        progress = QLabel()
+        progress.setObjectName("taskItem")
+        button = QPushButton("领取奖励")
         button.setCursor(Qt.PointingHandCursor)
         button.setObjectName("moduleAction")
         button.clicked.connect(lambda checked=False, key=task_id: self.store.complete_task(key))
         self.task_buttons[task_id] = button
+        self.task_progress_labels[task_id] = progress
         layout.addWidget(title)
         layout.addWidget(reward)
+        layout.addWidget(progress)
         layout.addWidget(button)
         return card
 
@@ -189,8 +208,9 @@ class StatusPage(QWidget):
                 bar.setFormat(f"{value}% · {self.store.affection_info()['title']}")
             else:
                 bar.setFormat(f"{value}%")
+        level = self.store.level_info()
         self.level_label.setText(
-            f"Lv.{stats.get('level', 1)}  经验 {exp}/{required}  金币 {stats.get('coins', 0)}  陪伴 {self.store.data.get('days', 1)} 天"
+            f"Lv.{level['level']}「{level['title']}」  经验 {exp}/{required}  金币 {stats.get('coins', 0)}  陪伴 {self.store.data.get('days', 1)} 天"
         )
         exp_percent = min(100, int(exp / max(1, required) * 100))
         self.exp_bar.setValue(exp_percent)
@@ -203,17 +223,31 @@ class StatusPage(QWidget):
         self._refresh_buffs()
         for task_id, button in self.task_buttons.items():
             done = bool(self.store.tasks.get(task_id))
-            button.setEnabled(not done)
-            button.setText("已完成" if done else "完成任务")
+            claimable = self.store.task_claimable(task_id)
+            button.setEnabled(claimable and not done)
+            button.setText("已领取" if done else ("领取奖励" if claimable else "未达成"))
+            if task_id in self.task_progress_labels:
+                _, _, label = self.store.task_progress(task_id)
+                self.task_progress_labels[task_id].setText(f"进度：{label}")
 
     def _refresh_growth_profile(self):
+        level = self.store.level_info()
+        exp, required = self.store.level_progress()
+        self.level_profile_label.setText(
+            f"当前称号：{level['title']}。\n"
+            f"升级经验：{exp}/{required}，升级奖励会少量发放金币。\n"
+            f"今日好感上限：{level['affection_cap']}，等级提升后才会逐步放宽。"
+        )
         affection = self.store.affection_info()
         if affection["to_next"]:
             next_text = f"距离「{affection['next_title']}」还差 {affection['to_next']} 点。"
         else:
             next_text = "好感已经达到最高阶段，继续保持陪伴即可。"
+        cap = self.store.daily_affection_cap()
+        gained = int(self.store.data.get("daily_counts", {}).get("affection_gain", 0))
         self.affection_profile_label.setText(
-            f"当前阶段：{affection['title']}（{affection['value']}%）。{next_text}\n{affection['description']}"
+            f"当前阶段：{affection['title']}（{affection['value']}%）。{next_text}\n"
+            f"{affection['description']}\n今日好感：{gained}/{cap}，高阶段会进一步递减。"
         )
         counts = self.store.data.get("daily_counts", {})
         self.daily_counts_label.setText(
@@ -222,7 +256,8 @@ class StatusPage(QWidget):
             f"投喂 {counts.get('feed', 0)} 次 / "
             f"散步 {counts.get('walk', 0)} 次 / "
             f"休息 {counts.get('rest', 0)} 次 / "
-            f"专注 {counts.get('focus', 0)} 次"
+            f"专注 {counts.get('focus', 0)} 次 / "
+            f"完整关怀 {counts.get('care', 0)} 次"
         )
 
     def _refresh_buffs(self):
