@@ -93,7 +93,7 @@ class StatusPage(QWidget):
             ("完成陪伴任务", self._complete_companion),
             ("恢复体力", self._rest),
             ("今日关怀", self._daily_care),
-            ("亲近互动", self._touch),
+            ("温柔互动", self._touch),
         ]
         for index, (label, callback) in enumerate(action_items):
             button = QPushButton(label)
@@ -233,10 +233,18 @@ class StatusPage(QWidget):
     def _refresh_growth_profile(self):
         level = self.store.level_info()
         exp, required = self.store.level_progress()
+        if level.get("next_milestone"):
+            next_unlock = (
+                f"Lv.{level['next_milestone']['level']} 解锁 "
+                f"{level['next_milestone']['affection_ceiling']}% 好感上限。"
+            )
+        else:
+            next_unlock = "等级称号已达到最高档。"
         self.level_profile_label.setText(
             f"当前称号：{level['title']}。\n"
-            f"升级经验：{exp}/{required}，升级奖励会少量发放金币。\n"
-            f"今日好感上限：{level['affection_cap']}，等级提升后才会逐步放宽。"
+            f"升级经验：{exp}/{required}，升级奖励只少量发放金币。\n"
+            f"好感等级上限：{level['affection_ceiling']}%，今日可提升：{level['affection_cap']} 点。\n"
+            f"{next_unlock}"
         )
         affection = self.store.affection_info()
         if affection["to_next"]:
@@ -247,7 +255,7 @@ class StatusPage(QWidget):
         gained = int(self.store.data.get("daily_counts", {}).get("affection_gain", 0))
         self.affection_profile_label.setText(
             f"当前阶段：{affection['title']}（{affection['value']}%）。{next_text}\n"
-            f"{affection['description']}\n今日好感：{gained}/{cap}，高阶段会进一步递减。"
+            f"{affection['description']}\n今日好感：{gained}/{cap}。普通触摸不直接增加好感，需要完整关怀、专注或礼物。"
         )
         counts = self.store.data.get("daily_counts", {})
         self.daily_counts_label.setText(
@@ -256,7 +264,7 @@ class StatusPage(QWidget):
             f"投喂 {counts.get('feed', 0)} 次 / "
             f"散步 {counts.get('walk', 0)} 次 / "
             f"休息 {counts.get('rest', 0)} 次 / "
-            f"专注 {counts.get('focus', 0)} 次 / "
+            f"专注 {counts.get('focus_minutes', 0)} 分钟 / "
             f"完整关怀 {counts.get('care', 0)} 次"
         )
 
@@ -283,7 +291,7 @@ class StatusPage(QWidget):
 
     def _touch(self):
         self.store.touch()
-        self.play_action("touch", "亲近互动已触发，今日好感收益会逐步放缓。")
+        self.play_action("touch", "温柔互动只提升心情；好感需要通过完整关怀、专注或礼物慢慢建立。")
 
 
 PAGE_STYLE = """

@@ -1001,7 +1001,7 @@ class PolarBearPetApp(QMainWindow):
             ("贴左边", "edge_left", "扒住左侧边缘。", None),
             ("贴右边", "edge_right", "扒住右侧边缘。", None),
             ("跳跃", "jump", "跳跃动作已触发。", "jump"),
-            ("互动反应", "touch", "摸摸头，心情变好啦。", "touch"),
+            ("互动反应", "touch", "温柔互动，心情提升；好感需要关怀任务慢慢建立。", "touch"),
         ]
         for index, (label, action_name, bubble, update) in enumerate(action_items):
             button = QPushButton(label)
@@ -1267,7 +1267,7 @@ class PolarBearPetApp(QMainWindow):
     def _trigger_pet_interaction(self):
         self.store.touch()
         self._register_touch_burst()
-        self._play_pet_action("touch", "触发互动，心情提升；好感收益按今日次数递减。")
+        self._play_pet_action("touch", "触发互动，心情提升；普通触摸不再直接增加好感。")
 
     def _play_pet_action(self, action_name, bubble=None):
         self.show_pet_window()
@@ -1294,7 +1294,7 @@ class PolarBearPetApp(QMainWindow):
         if action_name == "touch":
             self.store.touch()
             self._register_touch_burst()
-            self._show_bubble("摸摸头，心情变好了。")
+            self._show_bubble("心情变好了，好感要靠完整关怀慢慢积累。")
         elif action_name == "wave":
             self.store.add_log("互动", "桌宠挥了挥手。")
             self._show_bubble("我在这里。")
@@ -1331,7 +1331,7 @@ class PolarBearPetApp(QMainWindow):
                 "收到，陪伴信号很强。",
             ]
         )
-        self.store.add_log("互动", "连续点击触发了亲近反馈。")
+        self.store.add_log("互动", "连续点击触发了亲近反馈，但不会直接刷好感。")
         self._show_bubble(message)
 
     def _reset_touch_burst(self):
@@ -1522,6 +1522,7 @@ class PolarBearPetApp(QMainWindow):
         focus_done, focus_total, focus_text = self.store.focus_progress()
         exp, required = self.store.level_progress()
         affection = self.store.affection_info()
+        level = self.store.level_info()
         care_index = int(
             (
                 int(stats.get("hunger", 0))
@@ -1533,7 +1534,7 @@ class PolarBearPetApp(QMainWindow):
         )
         if self.hero_status_label:
             self.hero_status_label.setText(
-                f"Lv.{stats.get('level', 1)} {exp}/{required} EXP / 好感 {affection['title']} / 金币 {stats.get('coins', 0)} / 任务 {done}/{total}"
+                f"Lv.{level['level']}「{level['title']}」 {exp}/{required} EXP / 好感上限 {level['affection_ceiling']}% / 金币 {stats.get('coins', 0)} / 任务 {done}/{total}"
             )
         if care_index >= 85:
             dial_caption = "状态很好"
@@ -1561,7 +1562,7 @@ class PolarBearPetApp(QMainWindow):
             self.care_index_label.setText(str(care_index))
         if self.signal_caption_label:
             if care_index >= 85:
-                caption = "状态优秀，适合推进好感阶段"
+                caption = "状态优秀，可通过完整关怀推进好感"
             elif care_index >= 60:
                 caption = "状态稳定，注意资源规划"
             else:
@@ -1569,7 +1570,7 @@ class PolarBearPetApp(QMainWindow):
             self.signal_caption_label.setText(caption)
         if self.economy_summary_label:
             self.economy_summary_label.setText(
-                f"困难经济：金币 {stats.get('coins', 0)}，好感 {affection['value']}%，今日任务 {done}/{total}。"
+                f"困难经济：金币 {stats.get('coins', 0)}，好感 {affection['value']}%/{level['affection_ceiling']}%，今日任务 {done}/{total}。"
             )
         if self.today_summary_label:
             self.today_summary_label.setText(

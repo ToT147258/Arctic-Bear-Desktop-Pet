@@ -82,24 +82,33 @@ ITEM_CATALOG = {
 
 
 TASK_CATALOG = {
-    "daily_login": {"title": "今日签到", "reward": 1, "exp": 2, "requirement": {"type": "login", "target": 1}},
-    "companion": {"title": "陪伴 30 分钟", "reward": 4, "exp": 9, "requirement": {"type": "companion_minutes", "target": 30}},
-    "feed_once": {"title": "完成 1 次投喂", "reward": 2, "exp": 4, "requirement": {"type": "count", "key": "feed", "target": 1}},
-    "touch_once": {"title": "有效互动 2 次", "reward": 1, "exp": 3, "requirement": {"type": "count", "key": "touch", "target": 2}},
-    "sleep_once": {"title": "安排 1 次休息", "reward": 3, "exp": 5, "requirement": {"type": "count", "key": "rest", "target": 1}},
-    "walk_once": {"title": "散步 2 次", "reward": 2, "exp": 4, "requirement": {"type": "count", "key": "walk", "target": 2}},
-    "focus_once": {"title": "完成 1 次专注", "reward": 6, "exp": 12, "requirement": {"type": "count", "key": "focus", "target": 1}},
-    "care_plan": {"title": "完成完整关怀", "reward": 3, "exp": 6, "requirement": {"type": "count", "key": "care", "target": 1}},
-    "wellness": {"title": "四项状态 85+", "reward": 8, "exp": 15, "requirement": {"type": "wellness", "target": 85}},
-    "bond_breakthrough": {"title": "好感阶段突破", "reward": 4, "exp": 8, "requirement": {"type": "count", "key": "bond_breakthrough", "target": 1}},
+    "daily_login": {"title": "今日签到", "reward": 0, "exp": 1, "requirement": {"type": "login", "target": 1}},
+    "companion": {"title": "陪伴 45 分钟", "reward": 2, "exp": 8, "requirement": {"type": "companion_minutes", "target": 45}},
+    "feed_once": {"title": "合理投喂 2 次", "reward": 1, "exp": 3, "requirement": {"type": "count", "key": "feed", "target": 2}},
+    "touch_once": {"title": "温柔互动 5 次", "reward": 0, "exp": 1, "requirement": {"type": "count", "key": "touch", "target": 5}},
+    "sleep_once": {"title": "安排 1 次休息", "reward": 1, "exp": 3, "requirement": {"type": "count", "key": "rest", "target": 1}},
+    "walk_once": {"title": "散步 3 次", "reward": 1, "exp": 3, "requirement": {"type": "count", "key": "walk", "target": 3}},
+    "focus_once": {"title": "专注累计 25 分钟", "reward": 3, "exp": 8, "requirement": {"type": "count", "key": "focus_minutes", "target": 25}},
+    "care_plan": {"title": "完成完整关怀", "reward": 2, "exp": 5, "requirement": {"type": "count", "key": "care", "target": 1}},
+    "wellness": {"title": "四项状态 90+", "reward": 5, "exp": 12, "requirement": {"type": "wellness", "target": 90}},
+    "bond_breakthrough": {"title": "好感阶段突破", "reward": 2, "exp": 5, "requirement": {"type": "count", "key": "bond_breakthrough", "target": 1}},
 }
 
 
+LEVEL_MILESTONES = [
+    {"level": 1, "title": "新手饲养员", "affection_ceiling": 24, "daily_affection_cap": 1},
+    {"level": 4, "title": "稳定陪伴", "affection_ceiling": 38, "daily_affection_cap": 1},
+    {"level": 8, "title": "默契伙伴", "affection_ceiling": 55, "daily_affection_cap": 2},
+    {"level": 14, "title": "极地守护者", "affection_ceiling": 75, "daily_affection_cap": 2},
+    {"level": 22, "title": "冰原传说", "affection_ceiling": 100, "daily_affection_cap": 3},
+]
+
+
 AFFECTION_TIERS = [
-    {"min": 0, "title": "初见", "description": "还在观察你，适合轻量互动和稳定投喂。"},
-    {"min": 30, "title": "熟悉", "description": "开始记住你的陪伴，普通互动收益稳定。"},
-    {"min": 60, "title": "亲近", "description": "愿意主动回应，礼物和专注陪伴更有价值。"},
-    {"min": 85, "title": "信赖", "description": "已经很安心，阶段突破会带来额外奖励。"},
+    {"min": 0, "title": "初见", "description": "还在观察你，普通触摸只会提升心情，不能直接刷好感。"},
+    {"min": 30, "title": "熟悉", "description": "开始记住你的陪伴，好感主要来自完整关怀和稳定专注。"},
+    {"min": 60, "title": "亲近", "description": "愿意主动回应，礼物依然有效，但会受到等级和每日上限限制。"},
+    {"min": 85, "title": "信赖", "description": "已经很安心，阶段突破奖励很少，重点变成长期陪伴。"},
     {"min": 100, "title": "挚友", "description": "好感已满，后续重点转为保持状态和连续陪伴。"},
 ]
 
@@ -110,6 +119,7 @@ DEFAULT_DAILY_COUNTS = {
     "walk": 0,
     "rest": 0,
     "focus": 0,
+    "focus_minutes": 0,
     "care": 0,
     "affection_gain": 0,
     "bond_breakthrough": 0,
@@ -144,11 +154,11 @@ DEFAULT_DATA = {
         "edge_snap_enabled": True,
         "edge_snap_threshold": 48,
         "pet_toggle_hotkey": "Ctrl+Alt+B",
-        "companion_goal_minutes": 30,
+        "companion_goal_minutes": 45,
         "pat_multi_click_talk_threshold": 6,
     },
     "active_buffs": {},
-    "save_version": 2,
+    "save_version": 3,
     "created_at": "",
     "updated_at": "",
     "today": "",
@@ -256,7 +266,7 @@ class PetDataStore(QObject):
 
     def save(self):
         self.save_path.parent.mkdir(parents=True, exist_ok=True)
-        self.data["save_version"] = 2
+        self.data["save_version"] = 3
         self.data.setdefault("created_at", datetime.now().isoformat(timespec="seconds"))
         self.data["updated_at"] = datetime.now().isoformat(timespec="seconds")
         temp_path = self.save_path.with_name(f"{self.save_path.name}.tmp")
@@ -301,12 +311,12 @@ class PetDataStore(QObject):
         for key, value in DEFAULT_DATA["settings"].items():
             self.data["settings"].setdefault(key, value)
         self.data["settings"]["companion_goal_minutes"] = max(
-            30, self._safe_int(self.data["settings"].get("companion_goal_minutes", 30), 30)
+            45, self._safe_int(self.data["settings"].get("companion_goal_minutes", 45), 45)
         )
         if "auto_feed" not in self.data["settings"]:
             self.data["settings"]["auto_feed"] = False
         self.data.setdefault("active_buffs", {})
-        self.data.setdefault("save_version", 2)
+        self.data.setdefault("save_version", 3)
         now_text = datetime.now().isoformat(timespec="seconds")
         self.data.setdefault("created_at", now_text)
         self.data.setdefault("updated_at", now_text)
@@ -399,7 +409,7 @@ class PetDataStore(QObject):
 
     def level_exp_required(self, level=None):
         level = max(1, self._safe_int(level or self.stats.get("level", 1), 1))
-        return 180 + (level - 1) * 90 + max(0, level - 5) * 45
+        return 260 + (level - 1) * 140 + max(0, level - 8) * 80 + max(0, level - 18) * 120
 
     def level_progress(self):
         required = self.level_exp_required()
@@ -408,32 +418,30 @@ class PetDataStore(QObject):
 
     def level_info(self):
         level = max(1, self._safe_int(self.stats.get("level", 1), 1))
-        if level >= 25:
-            title = "冰原传说"
-        elif level >= 18:
-            title = "极地守护者"
-        elif level >= 12:
-            title = "默契伙伴"
-        elif level >= 6:
-            title = "稳定陪伴"
-        else:
-            title = "新手饲养员"
+        milestone = self._level_milestone(level)
+        next_milestone = next((item for item in LEVEL_MILESTONES if item["level"] > level), None)
         return {
             "level": level,
-            "title": title,
-            "affection_cap": self.daily_affection_cap(level),
+            "title": milestone["title"],
+            "affection_cap": milestone["daily_affection_cap"],
+            "affection_ceiling": milestone["affection_ceiling"],
+            "next_milestone": next_milestone,
             "next_exp": self.level_exp_required(level),
         }
 
-    def daily_affection_cap(self, level=None):
+    def _level_milestone(self, level=None):
         level = max(1, self._safe_int(level or self.stats.get("level", 1), 1))
-        if level >= 20:
-            return 5
-        if level >= 12:
-            return 4
-        if level >= 5:
-            return 3
-        return 2
+        current = LEVEL_MILESTONES[0]
+        for milestone in LEVEL_MILESTONES:
+            if level >= milestone["level"]:
+                current = milestone
+        return current
+
+    def affection_level_ceiling(self, level=None):
+        return self._level_milestone(level)["affection_ceiling"]
+
+    def daily_affection_cap(self, level=None):
+        return self._level_milestone(level)["daily_affection_cap"]
 
     def affection_tier(self, value=None):
         value = self._clamp_percent(self.stats.get("affection", 0) if value is None else value)
@@ -466,7 +474,8 @@ class PetDataStore(QObject):
         level = self.level_info()
         return (
             f"Lv.{level['level']}「{level['title']}」经验 {exp}/{required}，"
-            f"好感「{affection['title']}」{affection['value']}%，今日好感上限 {level['affection_cap']}。"
+            f"好感「{affection['title']}」{affection['value']}%，"
+            f"等级好感上限 {level['affection_ceiling']}%，今日可提升 {level['affection_cap']}。"
         )
 
     def add_log(self, category, message):
@@ -701,7 +710,7 @@ class PetDataStore(QObject):
         elif kind == "count":
             key = requirement.get("key", "")
             current = self._safe_int(self.data.get("daily_counts", {}).get(key, 0), 0)
-            label = f"{current}/{target}"
+            label = f"{current}/{target} 分钟" if key == "focus_minutes" else f"{current}/{target}"
         elif kind == "companion_minutes":
             current = self._safe_int(self.data.get("companion_seconds", 0), 0) // 60
             label = f"{current}/{target} 分钟"
@@ -729,9 +738,11 @@ class PetDataStore(QObject):
         elif current_value >= 60:
             amount = min(amount, 2)
         cap = self.daily_affection_cap()
+        level_ceiling = self.affection_level_ceiling()
         gained_today = self._safe_int(self.data.setdefault("daily_counts", {}).get("affection_gain", 0), 0)
         allowed = max(0, cap - gained_today)
-        gained = min(amount, allowed, 100 - current_value)
+        allowed_by_level = max(0, level_ceiling - current_value)
+        gained = min(amount, allowed, allowed_by_level, 100 - current_value)
         if gained <= 0:
             return 0
         before = current_value
@@ -755,7 +766,7 @@ class PetDataStore(QObject):
         self._check_wellness_task()
 
     def _check_wellness_task(self):
-        if all(self._safe_int(self.stats.get(key, 0), 0) >= 85 for key in ("hunger", "mood", "energy", "affection")):
+        if all(self._safe_int(self.stats.get(key, 0), 0) >= 90 for key in ("hunger", "mood", "energy", "affection")):
             self.complete_task("wellness", silent=True)
 
     def _check_affection_breakthrough(self, before, after):
@@ -771,7 +782,7 @@ class PetDataStore(QObject):
         self.data["daily_counts"]["bond_breakthrough"] = self._safe_int(
             self.data["daily_counts"].get("bond_breakthrough", 0), 0
         ) + 1
-        bonus = 3 + AFFECTION_TIERS.index(new_tier) * 2
+        bonus = 1 + AFFECTION_TIERS.index(new_tier)
         self.stats["coins"] = self._safe_int(self.stats.get("coins", 0), 0) + bonus
         self.complete_task("bond_breakthrough", silent=True)
         self.add_log("好感", f"好感进入「{new_tier['title']}」，额外获得 {bonus} 金币。")
@@ -835,7 +846,7 @@ class PetDataStore(QObject):
             required = self.level_exp_required()
             self.stats["exp"] -= required
             self.stats["level"] = self._safe_int(self.stats.get("level", 1), 1) + 1
-            reward = 4 + self._safe_int(self.stats.get("level", 1), 1) // 3
+            reward = 2 + self._safe_int(self.stats.get("level", 1), 1) // 5
             self.stats["coins"] = self._safe_int(self.stats.get("coins", 0), 0) + reward
             self.add_log(
                 "成长",
@@ -916,37 +927,29 @@ class PetDataStore(QObject):
     def touch(self):
         touches = self._safe_int(self.data["daily_counts"].get("touch", 0), 0)
         self.data["daily_counts"]["touch"] = touches + 1
-        if touches < 2:
-            mood_gain = 3
-            affection_gain = 1
-        elif touches < 6:
+        if touches < 5:
             mood_gain = 2
-            affection_gain = 0
         else:
             mood_gain = 1
-            affection_gain = 0
         effects = {"mood": mood_gain, "energy": -1}
-        if affection_gain:
-            effects["affection"] = affection_gain
         self.adjust_stats(effects)
         self.complete_task("touch_once", silent=True)
-        if affection_gain:
-            self.add_log("互动", f"触发亲近互动，好感 +{affection_gain}。")
-        else:
-            self.add_log("互动", "互动次数较多，今天好感收益已放缓。")
+        self.add_log("互动", "温柔互动只提升心情；好感需要通过完整关怀、专注或礼物慢慢建立。")
 
     def daily_care(self):
         if self.tasks.get("care_plan"):
             return False, "今天已经完成过关怀计划。"
         counts = self.data.get("daily_counts", {})
         if (
-            self._safe_int(counts.get("feed", 0), 0) < 1
-            or self._safe_int(counts.get("touch", 0), 0) < 2
-            or self._safe_int(self.data.get("companion_seconds", 0), 0) < 600
+            self._safe_int(counts.get("feed", 0), 0) < 2
+            or self._safe_int(counts.get("touch", 0), 0) < 5
+            or self._safe_int(counts.get("walk", 0), 0) < 1
+            or self._safe_int(counts.get("rest", 0), 0) < 1
+            or self._safe_int(self.data.get("companion_seconds", 0), 0) < 1200
         ):
-            return False, "完整关怀需要先完成 1 次投喂、2 次互动，并陪伴至少 10 分钟。"
+            return False, "完整关怀需要先完成 2 次投喂、5 次温柔互动、1 次散步、1 次休息，并陪伴至少 20 分钟。"
         self.data["daily_counts"]["care"] = 1
-        self.adjust_stats({"hunger": 3, "mood": 3, "energy": 3, "affection": 1})
+        self.adjust_stats({"hunger": 2, "mood": 2, "energy": 1, "affection": 1})
         self.complete_task("care_plan", silent=True)
         self.add_log("关怀", "完成今日关怀计划，四项状态都获得了照顾。")
         return True, "完成今日关怀，状态和好感都提升了。"
@@ -1006,7 +1009,7 @@ class PetDataStore(QObject):
                 self.adjust_stats(effects)
 
         self.data["companion_seconds"] = self._safe_int(self.data.get("companion_seconds", 0), 0) + elapsed
-        goal_seconds = max(30, self._safe_int(self.settings.get("companion_goal_minutes", 30), 30)) * 60
+        goal_seconds = max(45, self._safe_int(self.settings.get("companion_goal_minutes", 45), 45)) * 60
         if self.data["companion_seconds"] >= goal_seconds:
             if self.complete_task("companion", silent=True):
                 messages.append("陪伴任务完成，奖励已到账。")
@@ -1036,7 +1039,7 @@ class PetDataStore(QObject):
         return None
 
     def companion_progress(self):
-        goal_seconds = max(30, self._safe_int(self.settings.get("companion_goal_minutes", 30), 30)) * 60
+        goal_seconds = max(45, self._safe_int(self.settings.get("companion_goal_minutes", 45), 45)) * 60
         seconds = self._safe_int(self.data.get("companion_seconds", 0), 0)
         return seconds, max(1, goal_seconds)
 
@@ -1100,13 +1103,20 @@ class PetDataStore(QObject):
 
         title = session.get("title") or "专注"
         mode = session.get("mode", "focus")
+        total_minutes = max(1, self._safe_int(session.get("total_seconds", 0), 0) // 60)
         self.data["focus_session"] = deepcopy(DEFAULT_DATA["focus_session"])
         if mode == "focus":
             self.data["daily_counts"]["focus"] = self._safe_int(self.data["daily_counts"].get("focus", 0), 0) + 1
-            self.adjust_stats({"mood": 3, "affection": 1, "energy": -6})
+            self.data["daily_counts"]["focus_minutes"] = (
+                self._safe_int(self.data["daily_counts"].get("focus_minutes", 0), 0) + total_minutes
+            )
+            effects = {"mood": 3, "energy": -6}
+            if total_minutes >= 25:
+                effects["affection"] = 1
+            self.adjust_stats(effects)
             self.complete_task("focus_once", silent=True)
             self.stats["coins"] = self._safe_int(self.stats.get("coins", 0), 0) + 1
-            self.gain_exp(4)
+            self.gain_exp(2)
             message = f"「{title}」完成，奖励已到账。"
         else:
             self.adjust_stats({"energy": 8, "mood": 4})

@@ -93,7 +93,7 @@ class InteractionPage(QWidget):
 
     def _touch(self):
         self.store.touch()
-        self._play("touch", "摸摸头，心情变好了。")
+        self._play("touch", "温柔互动完成，心情提升；好感需要完整关怀慢慢积累。")
 
     def _walk_left(self):
         self.store.walk()

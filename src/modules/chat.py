@@ -129,7 +129,7 @@ class ChatPage(QWidget):
         if "累" in text or "休息" in text or int(stats.get("energy", 0)) < 35:
             return "那我们短休一下吧，恢复体力比硬撑更重要。", "sleep"
         if "摸" in text or "pat" in lowered:
-            return "收到摸摸头，心情变好啦。", "touch"
+            return "收到摸摸头，心情变好啦；好感要靠完整关怀、专注或礼物慢慢建立。", "touch"
         if "鼓励" in text or "加油" in text:
             return "你已经把这个项目一点点做起来了，继续收尾就会越来越像真正的软件。", "wave"
         return "我在这儿呢。你继续做项目，我会帮你看着提醒和状态。", "idle"
