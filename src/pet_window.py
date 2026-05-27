@@ -63,6 +63,7 @@ class PolarBearPetWindow(QWidget):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAutoFillBackground(False)
+        self._always_on_top = True
 
         self.asset_root = Path(__file__).resolve().parents[1] / "assets" / "polar_bear"
         self.role_root = self.asset_root / "role" / "PolarBear"
@@ -173,6 +174,10 @@ class PolarBearPetWindow(QWidget):
         self._save_walk_window_move()
 
     def set_always_on_top(self, enabled):
+        enabled = bool(enabled)
+        if self._always_on_top == enabled:
+            return
+        self._always_on_top = enabled
         visible = self.isVisible()
         flags = Qt.FramelessWindowHint | Qt.Tool
         if enabled:

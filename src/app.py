@@ -6,7 +6,7 @@ from math import cos, pi, sin
 from pathlib import Path
 from ctypes import wintypes
 
-from PySide6.QtCore import QEasingCurve, QEvent, QPointF, QRect, QRectF, QSize, Qt, QPropertyAnimation, QTimer
+from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QPropertyAnimation, QTimer
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QImage, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -686,6 +686,7 @@ class PolarBearPetApp(QMainWindow):
         self._page_factories = {}
         self._did_initial_page_show = False
         self._pet_user_hidden = False
+        self._pet_avoid_animation = None
         self._pet_hotkey_text = (
             _normalized_hotkey_text(self.store.settings.get("pet_toggle_hotkey"))
             or DEFAULT_PET_TOGGLE_HOTKEY_TEXT
@@ -1089,6 +1090,15 @@ class PolarBearPetApp(QMainWindow):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._sync_responsive_layout()
+        QTimer.singleShot(0, self._sync_pet_overlay_for_panel)
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        QTimer.singleShot(0, self._sync_pet_overlay_for_panel)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        QTimer.singleShot(0, self._sync_pet_overlay_for_panel)
 
     def _sync_responsive_layout(self):
         if not getattr(self, "_sidebar_scroll", None):
@@ -1272,8 +1282,8 @@ class PolarBearPetApp(QMainWindow):
         self._play_pet_action("touch", "触发互动，心情提升；普通触摸不再直接增加好感。")
 
     def _play_pet_action(self, action_name, bubble=None):
-        panel_active = self.isVisible() and self.isActiveWindow()
-        self.show_pet_window(activate=not panel_active)
+        panel_visible = self.isVisible()
+        self.show_pet_window(activate=not panel_visible)
         if action_name == "edge_left":
             self.pet_window.stick_to_edge("left")
         elif action_name == "edge_right":
@@ -1282,7 +1292,7 @@ class PolarBearPetApp(QMainWindow):
             self.pet_window.play_action(action_name)
         if bubble and self.store.settings.get("bubble_on", True):
             self.pet_window.show_bubble(bubble)
-        if panel_active:
+        if panel_visible:
             self._sync_pet_overlay_for_panel()
         self.pet_window.update()
 
@@ -1640,55 +1650,101 @@ class PolarBearPetApp(QMainWindow):
     def _show_pet_on_startup(self):
         self.show_pet_window(restore=True)
 
-    def _panel_geometry_with_margin(self):
-        return self.frameGeometry().adjusted(-12, -12, 12, 12)
+    def _panel_safe_geometry(self):
+        return self.frameGeometry().adjusted(-16, -16, 16, 16)
+
+    def _pet_visual_screen_rect(self, x=None, y=None):
+        window_x = self.pet_window.x() if x is None else int(x)
+        window_y = self.pet_window.y() if y is None else int(y)
+        if hasattr(self.pet_window, "_visible_pet_screen_rect"):
+            rect = self.pet_window._visible_pet_screen_rect(window_x, window_y).toAlignedRect()
+            if getattr(self.pet_window, "_bubble_text", ""):
+                rect = rect.adjusted(-96, -124, 96, 12)
+            return rect
+        return QRect(window_x, window_y, self.pet_window.width(), self.pet_window.height())
 
     def _pet_overlaps_panel(self):
         if not self.isVisible() or not self.pet_window.isVisible():
             return False
-        return self._panel_geometry_with_margin().intersects(self.pet_window.frameGeometry())
+        return self._pet_visual_screen_rect().intersects(self._panel_safe_geometry())
 
     def _pet_position_next_to_panel(self):
-        screen = QApplication.screenAt(self.frameGeometry().center()) or QApplication.primaryScreen()
+        panel = self._panel_safe_geometry()
+        screen = QApplication.screenAt(panel.center()) or QApplication.screenAt(self.pet_window.frameGeometry().center())
+        screen = screen or QApplication.primaryScreen()
         area = screen.availableGeometry() if screen else None
         if not area:
             return self.pet_window.x(), self.pet_window.y()
-        panel = self._panel_geometry_with_margin()
-        pet_w = self.pet_window.width()
-        pet_h = self.pet_window.height()
-        gap = 18
-        preferred_y = max(area.top() + 16, min(self.pet_window.y(), area.bottom() - pet_h - 16))
-        candidates = [
-            (panel.right() + gap, preferred_y),
-            (panel.left() - pet_w - gap, preferred_y),
-            (area.right() - pet_w - 28, area.bottom() - pet_h - 40),
-            (area.left() + 28, area.bottom() - pet_h - 40),
-            (area.right() - pet_w - 28, area.top() + 28),
-            (area.left() + 28, area.top() + 28),
-        ]
-        for x, y in candidates:
-            x, y = self._clamped_pet_position(x, y)
-            candidate_rect = QRect(x, y, pet_w, pet_h)
-            if area.contains(candidate_rect) and not candidate_rect.intersects(panel):
-                return x, y
-        return self._clamped_pet_position(area.right() - pet_w - 28, area.bottom() - pet_h - 40)
 
-    def _move_pet_next_to_panel_if_needed(self):
-        if not self._pet_overlaps_panel():
+        current_rect = self._pet_visual_screen_rect()
+        offset_left = current_rect.left() - self.pet_window.x()
+        offset_right = current_rect.right() - self.pet_window.x()
+        offset_top = current_rect.top() - self.pet_window.y()
+        offset_bottom = current_rect.bottom() - self.pet_window.y()
+        gap = max(18, round(28 * getattr(self.pet_window, "_scale", 0.6)))
+        preferred_y = self.pet_window.y()
+
+        left_x = panel.left() - gap - offset_right
+        right_x = panel.right() + gap - offset_left
+        above_y = panel.top() - gap - offset_bottom
+        below_y = panel.bottom() + gap - offset_top
+        center_x = current_rect.center().x()
+        center_y = current_rect.center().y()
+
+        side_candidates = []
+        if center_x < panel.center().x():
+            side_candidates.extend([(left_x, preferred_y), (right_x, preferred_y)])
+        else:
+            side_candidates.extend([(right_x, preferred_y), (left_x, preferred_y)])
+
+        vertical_candidates = []
+        if center_y < panel.center().y():
+            vertical_candidates.extend([(self.pet_window.x(), above_y), (self.pet_window.x(), below_y)])
+        else:
+            vertical_candidates.extend([(self.pet_window.x(), below_y), (self.pet_window.x(), above_y)])
+
+        corner_candidates = [
+            (area.left() + 18 - offset_left, area.top() + 18 - offset_top),
+            (area.right() - 18 - offset_right, area.top() + 18 - offset_top),
+            (area.left() + 18 - offset_left, area.bottom() - 18 - offset_bottom),
+            (area.right() - 18 - offset_right, area.bottom() - 18 - offset_bottom),
+        ]
+
+        for raw_x, raw_y in side_candidates + vertical_candidates + corner_candidates:
+            x, y = self._clamped_pet_position(raw_x, raw_y)
+            if not self._pet_visual_screen_rect(x, y).intersects(panel):
+                return x, y
+        return self._clamped_pet_position(self.pet_window.x(), self.pet_window.y())
+
+    def _animate_pet_to(self, x, y):
+        target = QPoint(int(x), int(y))
+        if (self.pet_window.pos() - target).manhattanLength() <= 3:
             return
-        next_x, next_y = self._pet_position_next_to_panel()
-        if (next_x, next_y) != (self.pet_window.x(), self.pet_window.y()):
-            self.pet_window.move(next_x, next_y)
-            self.store.settings["pet_window_x"] = int(next_x)
-            self.store.settings["pet_window_y"] = int(next_y)
+        if self._pet_avoid_animation:
+            self._pet_avoid_animation.stop()
+        animation = QPropertyAnimation(self.pet_window, b"pos", self)
+        animation.setStartValue(self.pet_window.pos())
+        animation.setEndValue(target)
+        animation.setDuration(190)
+        animation.setEasingCurve(QEasingCurve.OutCubic)
+        animation.start()
+        self._pet_avoid_animation = animation
 
     def _sync_pet_overlay_for_panel(self):
         if not self.pet_window.isVisible():
             return
         self.pet_window.set_always_on_top(bool(self.store.settings.get("always_on_top", True)))
-        if self.isVisible() and self.isActiveWindow():
-            self._move_pet_next_to_panel_if_needed()
-            self.pet_window.raise_()
+        if not self.isVisible():
+            return
+        if getattr(self.pet_window, "_is_dragging", False):
+            return
+        if self._pet_overlaps_panel():
+            panel = self._panel_safe_geometry()
+            x, y = self._pet_position_next_to_panel()
+            if self._pet_visual_screen_rect(x, y).intersects(panel) and getattr(self.pet_window, "_bubble_text", ""):
+                self.pet_window._clear_bubble()
+                x, y = self._pet_position_next_to_panel()
+            self._animate_pet_to(x, y)
 
     def changeEvent(self, event):
         super().changeEvent(event)
