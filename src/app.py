@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 
 from src.modules.backpack import BackpackPage
 from src.modules.chat import ChatPage
+from src.modules.growth import GrowthPage
 from src.modules.interaction import InteractionPage
 from src.modules.notification import NotificationPage
 from src.modules.settings import SettingsPage
@@ -735,6 +736,7 @@ class PolarBearPetApp(QMainWindow):
         self.stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         pages = [
             ("宠物状态", self._build_overview_page, True),
+            ("成长等级", lambda: self._scroll_module_page(GrowthPage(self.store, self._play_pet_action)), False),
             ("课程提醒", lambda: self._scroll_module_page(NotificationPage(self.store, self.pet_window)), False),
             (
                 "动作管理",
