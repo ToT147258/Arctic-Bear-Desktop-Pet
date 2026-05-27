@@ -1232,12 +1232,15 @@ class PolarBearPetWindow(QWidget):
         scale = self._scale
         margin = max(7, round(14 * scale))
         pet_rect = self._visible_pet_rect()
-        preferred_width = max(168, round(250 * scale))
+        preferred_width = max(220, round(360 * scale))
         preferred_width = min(preferred_width, max(120, self.width() - margin * 2))
         min_width = max(112, round(132 * scale))
         content_right = content_left + self._content_width
         content_left_bound = max(margin, content_left + round(10 * scale))
         content_right_bound = min(self.width() - margin, content_right - round(10 * scale))
+        if self._edge_stick_side not in {"left", "right"}:
+            content_left_bound = margin
+            content_right_bound = self.width() - margin
         if content_right_bound - content_left_bound < min_width:
             content_left_bound = margin
             content_right_bound = self.width() - margin
@@ -1259,7 +1262,7 @@ class PolarBearPetWindow(QWidget):
             self._bubble_text,
         )
         bubble_height = max(max(38, round(48 * scale)), math.ceil(measured.height()) + text_margin * 2)
-        bubble_height = min(bubble_height, max(76, round(96 * scale)))
+        bubble_height = min(bubble_height, max(108, round(156 * scale)))
         min_y = max(5, round(10 * scale))
         max_y = self.height() - bubble_height - max(14, round(44 * scale))
         if self._edge_stick_side in {"left", "right"}:
@@ -1289,7 +1292,7 @@ class PolarBearPetWindow(QWidget):
         painter.drawRoundedRect(bubble_rect, max(8, round(12 * scale)), max(8, round(12 * scale)))
         painter.setPen(QColor(235, 250, 255))
         painter.drawText(
-            bubble_rect.adjusted(text_margin, 0, -text_margin, 0),
+            bubble_rect.adjusted(text_margin, round(4 * scale), -text_margin, -round(4 * scale)),
             Qt.AlignCenter | Qt.TextWordWrap,
             self._bubble_text,
         )

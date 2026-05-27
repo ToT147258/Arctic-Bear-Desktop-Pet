@@ -6,7 +6,7 @@ from math import cos, pi, sin
 from pathlib import Path
 from ctypes import wintypes
 
-from PySide6.QtCore import QEasingCurve, QPointF, QRect, QRectF, QSize, Qt, QPropertyAnimation, QTimer
+from PySide6.QtCore import QEasingCurve, QEvent, QPointF, QRect, QRectF, QSize, Qt, QPropertyAnimation, QTimer
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QImage, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -686,6 +686,7 @@ class PolarBearPetApp(QMainWindow):
         self._page_factories = {}
         self._did_initial_page_show = False
         self._pet_user_hidden = False
+        self._pet_topmost_suspended = False
         self._pet_hotkey_text = (
             _normalized_hotkey_text(self.store.settings.get("pet_toggle_hotkey"))
             or DEFAULT_PET_TOGGLE_HOTKEY_TEXT
@@ -1272,7 +1273,8 @@ class PolarBearPetApp(QMainWindow):
         self._play_pet_action("touch", "触发互动，心情提升；普通触摸不再直接增加好感。")
 
     def _play_pet_action(self, action_name, bubble=None):
-        self.show_pet_window()
+        panel_active = self.isVisible() and self.isActiveWindow()
+        self.show_pet_window(activate=not panel_active)
         if action_name == "edge_left":
             self.pet_window.stick_to_edge("left")
         elif action_name == "edge_right":
@@ -1281,6 +1283,8 @@ class PolarBearPetApp(QMainWindow):
             self.pet_window.play_action(action_name)
         if bubble and self.store.settings.get("bubble_on", True):
             self.pet_window.show_bubble(bubble)
+        if panel_active:
+            self._sync_pet_overlay_for_panel()
         self.pet_window.update()
 
     def _handle_pet_window_interaction(self, action_name):
@@ -1485,6 +1489,7 @@ class PolarBearPetApp(QMainWindow):
         self.show()
         self.raise_()
         self.activateWindow()
+        QTimer.singleShot(0, self._sync_pet_overlay_for_panel)
 
     def _handle_tray_activated(self, reason):
         if reason == QSystemTrayIcon.Trigger:
@@ -1634,15 +1639,59 @@ class PolarBearPetApp(QMainWindow):
     def _show_pet_on_startup(self):
         self.show_pet_window(restore=True)
 
-    def show_pet_window(self, checked=False, restore=True):
+    def _pet_overlaps_panel(self):
+        if not self.isVisible() or not self.pet_window.isVisible():
+            return False
+        panel_rect = self.frameGeometry().adjusted(-8, -8, 8, 8)
+        pet_rect = self.pet_window.frameGeometry()
+        return panel_rect.intersects(pet_rect)
+
+    def _suspend_pet_overlay_for_panel(self):
+        if not bool(self.store.settings.get("always_on_top", True)):
+            return
+        if not self.pet_window.isVisible():
+            return
+        self._pet_topmost_suspended = True
+        self.pet_window.set_always_on_top(False)
+        self.pet_window.lower()
+        self.raise_()
+
+    def _restore_pet_overlay_after_panel(self):
+        if not self._pet_topmost_suspended:
+            return
+        self._pet_topmost_suspended = False
+        if bool(self.store.settings.get("always_on_top", True)):
+            self.pet_window.set_always_on_top(True)
+
+    def _sync_pet_overlay_for_panel(self):
+        if self.isVisible() and self.isActiveWindow() and self._pet_overlaps_panel():
+            self._suspend_pet_overlay_for_panel()
+        elif self.isVisible() and self.isActiveWindow() and self._pet_topmost_suspended:
+            self._restore_pet_overlay_after_panel()
+        elif not self.isActiveWindow():
+            self._restore_pet_overlay_after_panel()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.ActivationChange:
+            if self.isActiveWindow():
+                QTimer.singleShot(0, self._sync_pet_overlay_for_panel)
+            else:
+                QTimer.singleShot(160, self._sync_pet_overlay_for_panel)
+
+    def show_pet_window(self, checked=False, restore=True, activate=True):
         was_visible = self.pet_window.isVisible()
         if restore and not was_visible:
             self._restore_pet_position()
         if self.pet_window.isMinimized():
             self.pet_window.showNormal()
         self.pet_window.show()
-        self.pet_window.raise_()
-        self.pet_window.activateWindow()
+        if activate:
+            self._restore_pet_overlay_after_panel()
+            self.pet_window.raise_()
+            self.pet_window.activateWindow()
+        else:
+            self._sync_pet_overlay_for_panel()
         self.pet_window.update()
         self._pet_user_hidden = False
 

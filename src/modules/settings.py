@@ -1,24 +1,32 @@
+import threading
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QKeySequenceEdit,
+    QLineEdit,
+    QPushButton,
     QSlider,
     QVBoxLayout,
     QWidget,
 )
+
+from src.llm_client import LLMClient, LLM_PROVIDERS, normalize_llm_config
 
 
 DEFAULT_HOTKEY = "Ctrl+Alt+B"
 
 
 class SettingsPage(QWidget):
+    llm_test_ready = Signal(bool, str)
+
     def __init__(self, store, pet_window, get_hotkey=None, set_hotkey=None):
         super().__init__()
         self.store = store
@@ -36,8 +44,18 @@ class SettingsPage(QWidget):
         self.opacity_slider = None
         self.edge_threshold_slider = None
         self.click_threshold_slider = None
+        self.llm_enabled = None
+        self.llm_provider = None
+        self.llm_model = None
+        self.llm_api_url = None
+        self.llm_api_key = None
+        self.llm_auto_talk = None
+        self.llm_status = None
+        self.llm_test_button = None
+        self._updating_llm_controls = False
         self._build_ui()
         self.store.changed.connect(self.refresh)
+        self.llm_test_ready.connect(self._on_llm_test_result)
         self.refresh()
 
     def _build_ui(self):
@@ -56,6 +74,7 @@ class SettingsPage(QWidget):
         layout.addWidget(self._scale_card())
         layout.addWidget(self._window_card())
         layout.addWidget(self._hotkey_card())
+        layout.addWidget(self._llm_card())
         layout.addWidget(self._save_card())
         layout.addStretch()
         self.setStyleSheet(PAGE_STYLE)
@@ -194,6 +213,75 @@ class SettingsPage(QWidget):
         layout.addLayout(row)
         return card
 
+    def _llm_card(self):
+        card = QFrame()
+        card.setObjectName("moduleCard")
+        layout = QVBoxLayout(card)
+        layout.setSpacing(10)
+        title = QLabel("AI 大模型")
+        title.setObjectName("cardTitle")
+        desc = QLabel("支持 DeepSeek、ChatGPT/OpenAI、智谱 GLM、通义千问、Kimi 和自定义 OpenAI 兼容接口。配置后聊天页会优先使用联网大模型。")
+        desc.setWordWrap(True)
+        desc.setObjectName("taskItem")
+
+        self.llm_enabled = QCheckBox("启用联网大模型聊天")
+        self.llm_enabled.setObjectName("checkBox")
+        self.llm_auto_talk = QCheckBox("允许桌宠主动使用大模型生成轻量陪伴语")
+        self.llm_auto_talk.setObjectName("checkBox")
+
+        form = QGridLayout()
+        form.setSpacing(8)
+        self.llm_provider = QComboBox()
+        self.llm_provider.setObjectName("settingCombo")
+        for key, provider in LLM_PROVIDERS.items():
+            self.llm_provider.addItem(provider["name"], key)
+        self.llm_provider.currentIndexChanged.connect(self._llm_provider_changed)
+
+        self.llm_model = QComboBox()
+        self.llm_model.setObjectName("settingCombo")
+        self.llm_model.setEditable(True)
+
+        self.llm_api_url = QLineEdit()
+        self.llm_api_url.setObjectName("settingInput")
+        self.llm_api_url.setPlaceholderText("https://api.deepseek.com")
+        self.llm_api_key = QLineEdit()
+        self.llm_api_key.setObjectName("settingInput")
+        self.llm_api_key.setEchoMode(QLineEdit.Password)
+        self.llm_api_key.setPlaceholderText("输入 API Key，本地保存到 data/save.json")
+
+        form.addWidget(QLabel("服务商"), 0, 0)
+        form.addWidget(self.llm_provider, 0, 1)
+        form.addWidget(QLabel("模型"), 0, 2)
+        form.addWidget(self.llm_model, 0, 3)
+        form.addWidget(QLabel("API 地址"), 1, 0)
+        form.addWidget(self.llm_api_url, 1, 1, 1, 3)
+        form.addWidget(QLabel("API Key"), 2, 0)
+        form.addWidget(self.llm_api_key, 2, 1, 1, 3)
+
+        self.llm_status = QLabel()
+        self.llm_status.setWordWrap(True)
+        self.llm_status.setObjectName("taskItem")
+        actions = QHBoxLayout()
+        save = QPushButton("保存 AI 配置")
+        save.setCursor(Qt.PointingHandCursor)
+        save.setObjectName("moduleAction")
+        save.clicked.connect(self._save_llm_config)
+        self.llm_test_button = QPushButton("测试连接")
+        self.llm_test_button.setCursor(Qt.PointingHandCursor)
+        self.llm_test_button.setObjectName("moduleAction")
+        self.llm_test_button.clicked.connect(self._test_llm_connection)
+        actions.addWidget(save)
+        actions.addWidget(self.llm_test_button)
+
+        layout.addWidget(title)
+        layout.addWidget(desc)
+        layout.addWidget(self.llm_enabled)
+        layout.addWidget(self.llm_auto_talk)
+        layout.addLayout(form)
+        layout.addWidget(self.llm_status)
+        layout.addLayout(actions)
+        return card
+
     def _save_card(self):
         card = QFrame()
         card.setObjectName("moduleCard")
@@ -233,6 +321,7 @@ class SettingsPage(QWidget):
         if self.hotkey_value:
             hotkey = self.get_hotkey() or DEFAULT_HOTKEY
             self.hotkey_value.setText(f"当前显示 / 隐藏快捷键：{hotkey}")
+        self._refresh_llm_controls()
 
     def _preview_scale(self, value):
         self.scale_value.setText(f"当前比例：{value}%")
@@ -310,6 +399,84 @@ class SettingsPage(QWidget):
         self.hotkey_editor.setKeySequence(QKeySequence(DEFAULT_HOTKEY))
         self._save_hotkey()
 
+    def _refresh_llm_controls(self):
+        if not self.llm_provider:
+            return
+        editing = any(
+            widget and widget.hasFocus()
+            for widget in (self.llm_provider, self.llm_model, self.llm_api_url, self.llm_api_key)
+        )
+        if editing:
+            return
+        cfg = normalize_llm_config(self.store.settings.get("llm", {}))
+        self._updating_llm_controls = True
+        self.llm_enabled.setChecked(bool(cfg.get("enabled")))
+        self.llm_auto_talk.setChecked(bool(cfg.get("auto_talk")))
+        index = self.llm_provider.findData(cfg["provider"])
+        self.llm_provider.setCurrentIndex(max(0, index))
+        self._load_llm_models(cfg["provider"], cfg.get("model", ""))
+        self.llm_api_url.setText(cfg.get("api_url", ""))
+        self.llm_api_key.setText(cfg.get("api_key", ""))
+        provider_name = LLM_PROVIDERS.get(cfg["provider"], LLM_PROVIDERS["deepseek"])["name"]
+        state = "已启用" if cfg.get("enabled") else "未启用"
+        key_state = "已填写 Key" if cfg.get("api_key") else "未填写 Key"
+        self.llm_status.setText(f"当前：{state} · {provider_name} · {cfg.get('model')} · {key_state}")
+        self._updating_llm_controls = False
+
+    def _load_llm_models(self, provider_key, current_model=""):
+        self.llm_model.clear()
+        models = LLM_PROVIDERS.get(provider_key, {}).get("models", [])
+        self.llm_model.addItems(models)
+        if current_model:
+            if self.llm_model.findText(current_model) < 0:
+                self.llm_model.addItem(current_model)
+            self.llm_model.setCurrentText(current_model)
+        elif models:
+            self.llm_model.setCurrentText(models[0])
+
+    def _llm_provider_changed(self, *_):
+        if self._updating_llm_controls:
+            return
+        provider_key = self.llm_provider.currentData() or "deepseek"
+        provider = LLM_PROVIDERS.get(provider_key, LLM_PROVIDERS["deepseek"])
+        models = provider.get("models", [])
+        self._load_llm_models(provider_key, models[0] if models else "")
+        self.llm_api_url.setText(provider.get("default_url", ""))
+
+    def _current_llm_config(self):
+        return normalize_llm_config(
+            {
+                "enabled": self.llm_enabled.isChecked(),
+                "provider": self.llm_provider.currentData() or "deepseek",
+                "model": self.llm_model.currentText().strip(),
+                "api_url": self.llm_api_url.text().strip(),
+                "api_key": self.llm_api_key.text().strip(),
+                "auto_talk": self.llm_auto_talk.isChecked(),
+            }
+        )
+
+    def _save_llm_config(self):
+        self.store.set_llm_config(self._current_llm_config())
+        self.llm_status.setText("AI 大模型配置已保存。")
+
+    def _test_llm_connection(self):
+        self.store.set_llm_config(self._current_llm_config())
+        if self.llm_test_button:
+            self.llm_test_button.setEnabled(False)
+            self.llm_test_button.setText("测试中...")
+        threading.Thread(target=self._worker_test_llm, daemon=True).start()
+
+    def _worker_test_llm(self):
+        ok, message = LLMClient(self.store).quick_check()
+        self.llm_test_ready.emit(ok, message)
+
+    def _on_llm_test_result(self, ok, message):
+        if self.llm_test_button:
+            self.llm_test_button.setEnabled(True)
+            self.llm_test_button.setText("测试连接")
+        self.store.add_log("AI", message)
+        self.llm_status.setText(message)
+
     def _save_settings(self):
         self.store.save()
         self.store.add_log("设置", "当前设置已保存。")
@@ -334,6 +501,7 @@ class SettingsPage(QWidget):
         self.opacity_slider.setValue(100)
         self.edge_threshold_slider.setValue(48)
         self.click_threshold_slider.setValue(6)
+        self._refresh_llm_controls()
 
 
 PAGE_STYLE = """
@@ -394,6 +562,19 @@ QKeySequenceEdit#hotkeyEditor {
     border: 1px solid #b8e1ef;
     border-radius: 12px;
     padding: 6px 10px;
+}
+QComboBox#settingCombo, QLineEdit#settingInput {
+    min-height: 38px;
+    color: #284f66;
+    background: #ffffff;
+    border: 1px solid #b8e1ef;
+    border-radius: 12px;
+    padding: 6px 10px;
+}
+#moduleAction:disabled {
+    color: #88a3b2;
+    background: #e9f4f8;
+    border-color: #d3e9f0;
 }
 QLabel {
     color: #31556b;

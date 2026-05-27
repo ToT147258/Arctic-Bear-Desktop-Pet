@@ -7,6 +7,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
 
+from src.llm_client import LLM_DEFAULT_CONFIG, normalize_llm_config
+
 
 WEEKDAY_ORDER = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 WEEKDAY_INDEX = {name: index for index, name in enumerate(WEEKDAY_ORDER)}
@@ -156,6 +158,7 @@ DEFAULT_DATA = {
         "pet_toggle_hotkey": "Ctrl+Alt+B",
         "companion_goal_minutes": 45,
         "pat_multi_click_talk_threshold": 6,
+        "llm": deepcopy(LLM_DEFAULT_CONFIG),
     },
     "active_buffs": {},
     "save_version": 3,
@@ -310,6 +313,7 @@ class PetDataStore(QObject):
             self.data["tasks"].setdefault(key, False)
         for key, value in DEFAULT_DATA["settings"].items():
             self.data["settings"].setdefault(key, value)
+        self.data["settings"]["llm"] = normalize_llm_config(self.data["settings"].get("llm", {}))
         self.data["settings"]["companion_goal_minutes"] = max(
             45, self._safe_int(self.data["settings"].get("companion_goal_minutes", 45), 45)
         )
@@ -974,6 +978,10 @@ class PetDataStore(QObject):
             "pat_multi_click_talk_threshold": "连续互动阈值",
         }
         self.add_log("设置", f"{labels.get(key, key)}已更新。")
+
+    def set_llm_config(self, config):
+        self.settings["llm"] = normalize_llm_config(config)
+        self.add_log("设置", "AI 大模型配置已更新。")
 
     def reset_all(self):
         self.data = deepcopy(DEFAULT_DATA)
