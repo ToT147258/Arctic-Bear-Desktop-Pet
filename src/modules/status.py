@@ -1,9 +1,9 @@
 import time
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QProgressBar, QPushButton, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
-from src.pet_data import TASK_CATALOG
+from src.pet_data import LEVEL_MILESTONES, TASK_CATALOG
 
 
 STAT_LABELS = {
@@ -24,6 +24,10 @@ class StatusPage(QWidget):
         self.task_progress_labels = {}
         self.level_label = None
         self.exp_bar = None
+        self.sidebar_affection_bar = None
+        self.daily_affection_bar = None
+        self.next_unlock_label = None
+        self.growth_route_label = None
         self.companion_bar = None
         self.buff_label = None
         self.level_profile_label = None
@@ -52,14 +56,10 @@ class StatusPage(QWidget):
         layout.addWidget(title)
         layout.addWidget(desc)
 
-        self.level_label = QLabel()
-        self.level_label.setObjectName("levelText")
-        layout.addWidget(self.level_label)
-        self.exp_bar = QProgressBar()
-        self.exp_bar.setRange(0, 100)
-        self.exp_bar.setTextVisible(True)
-        self.exp_bar.setObjectName("statBar")
-        layout.addWidget(self.exp_bar)
+        body = QHBoxLayout()
+        body.setSpacing(18)
+        main_column = QVBoxLayout()
+        main_column.setSpacing(16)
 
         companion_card = QFrame()
         companion_card.setObjectName("moduleCard")
@@ -72,20 +72,19 @@ class StatusPage(QWidget):
         self.companion_bar.setObjectName("statBar")
         companion_layout.addWidget(companion_title)
         companion_layout.addWidget(self.companion_bar)
-        layout.addWidget(companion_card)
+        main_column.addWidget(companion_card)
 
         profile_grid = QGridLayout()
         profile_grid.setSpacing(12)
-        profile_grid.addWidget(self._level_card("等级档案"), 0, 0, 1, 2)
-        profile_grid.addWidget(self._profile_card("好感档案"), 1, 0)
-        profile_grid.addWidget(self._daily_card("今日行为"), 1, 1)
-        layout.addLayout(profile_grid)
+        profile_grid.addWidget(self._profile_card("好感档案"), 0, 0)
+        profile_grid.addWidget(self._daily_card("今日行为"), 0, 1)
+        main_column.addLayout(profile_grid)
 
         stat_grid = QGridLayout()
         stat_grid.setSpacing(12)
         for index, (key, label) in enumerate(STAT_LABELS.items()):
             stat_grid.addWidget(self._stat_card(key, label), index // 2, index % 2)
-        layout.addLayout(stat_grid)
+        main_column.addLayout(stat_grid)
 
         actions = QGridLayout()
         actions.setSpacing(10)
@@ -101,23 +100,26 @@ class StatusPage(QWidget):
             button.setObjectName("moduleAction")
             button.clicked.connect(callback)
             actions.addWidget(button, index // 5, index % 5)
-        layout.addLayout(actions)
+        main_column.addLayout(actions)
 
         self.buff_label = QLabel()
         self.buff_label.setWordWrap(True)
         self.buff_label.setObjectName("buffText")
-        layout.addWidget(self.buff_label)
+        main_column.addWidget(self.buff_label)
 
         section = QLabel("每日任务")
         section.setObjectName("sectionTitle")
-        layout.addWidget(section)
+        main_column.addWidget(section)
 
         task_grid = QGridLayout()
         task_grid.setSpacing(12)
         for index, (task_id, task) in enumerate(TASK_CATALOG.items()):
             task_grid.addWidget(self._task_card(task_id, task), index // 3, index % 3)
-        layout.addLayout(task_grid)
-        layout.addStretch()
+        main_column.addLayout(task_grid)
+        main_column.addStretch()
+        body.addLayout(main_column, 1)
+        body.addWidget(self._growth_sidebar())
+        layout.addLayout(body)
         scroll.setWidget(content)
         root_layout.addWidget(scroll)
         self.setStyleSheet(PAGE_STYLE)
@@ -150,18 +152,61 @@ class StatusPage(QWidget):
         layout.addWidget(self.affection_profile_label)
         return card
 
-    def _level_card(self, title):
-        card = QFrame()
-        card.setObjectName("moduleCard")
-        layout = QVBoxLayout(card)
-        heading = QLabel(title)
-        heading.setObjectName("cardTitle")
+    def _growth_sidebar(self):
+        sidebar = QFrame()
+        sidebar.setObjectName("growthSidebar")
+        sidebar.setMinimumWidth(280)
+        sidebar.setMaximumWidth(330)
+        layout = QVBoxLayout(sidebar)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+
+        heading = QLabel("成长侧栏")
+        heading.setObjectName("growthTitle")
+        self.level_label = QLabel()
+        self.level_label.setWordWrap(True)
+        self.level_label.setObjectName("levelHeroText")
+
+        self.exp_bar = QProgressBar()
+        self.exp_bar.setRange(0, 100)
+        self.exp_bar.setTextVisible(True)
+        self.exp_bar.setObjectName("growthBar")
+
+        self.sidebar_affection_bar = QProgressBar()
+        self.sidebar_affection_bar.setRange(0, 100)
+        self.sidebar_affection_bar.setTextVisible(True)
+        self.sidebar_affection_bar.setObjectName("growthBar")
+
+        self.daily_affection_bar = QProgressBar()
+        self.daily_affection_bar.setRange(0, 100)
+        self.daily_affection_bar.setTextVisible(True)
+        self.daily_affection_bar.setObjectName("growthBar")
+
         self.level_profile_label = QLabel()
         self.level_profile_label.setWordWrap(True)
-        self.level_profile_label.setObjectName("taskItem")
+        self.level_profile_label.setObjectName("sideLabel")
+
+        self.next_unlock_label = QLabel()
+        self.next_unlock_label.setWordWrap(True)
+        self.next_unlock_label.setObjectName("unlockPill")
+
+        route_title = QLabel("等级路线")
+        route_title.setObjectName("sideSectionTitle")
+        self.growth_route_label = QLabel()
+        self.growth_route_label.setWordWrap(True)
+        self.growth_route_label.setObjectName("routeText")
+
         layout.addWidget(heading)
+        layout.addWidget(self.level_label)
+        layout.addWidget(self.exp_bar)
+        layout.addWidget(self.sidebar_affection_bar)
+        layout.addWidget(self.daily_affection_bar)
         layout.addWidget(self.level_profile_label)
-        return card
+        layout.addWidget(self.next_unlock_label)
+        layout.addWidget(route_title)
+        layout.addWidget(self.growth_route_label)
+        layout.addStretch()
+        return sidebar
 
     def _daily_card(self, title):
         card = QFrame()
@@ -210,11 +255,11 @@ class StatusPage(QWidget):
                 bar.setFormat(f"{value}%")
         level = self.store.level_info()
         self.level_label.setText(
-            f"Lv.{level['level']}「{level['title']}」  经验 {exp}/{required}  金币 {stats.get('coins', 0)}  陪伴 {self.store.data.get('days', 1)} 天"
+            f"Lv.{level['level']}\n「{level['title']}」\n金币 {stats.get('coins', 0)} · 陪伴 {self.store.data.get('days', 1)} 天"
         )
         exp_percent = min(100, int(exp / max(1, required) * 100))
         self.exp_bar.setValue(exp_percent)
-        self.exp_bar.setFormat(f"升级进度 {exp}/{required}")
+        self.exp_bar.setFormat(f"升级 {exp}/{required} EXP")
         seconds, goal = self.store.companion_progress()
         percent = min(100, int(seconds / goal * 100))
         self.companion_bar.setValue(percent)
@@ -240,19 +285,32 @@ class StatusPage(QWidget):
             )
         else:
             next_unlock = "等级称号已达到最高档。"
-        self.level_profile_label.setText(
-            f"当前称号：{level['title']}。\n"
-            f"升级经验：{exp}/{required}，升级奖励只少量发放金币。\n"
-            f"好感等级上限：{level['affection_ceiling']}%，今日可提升：{level['affection_cap']} 点。\n"
-            f"{next_unlock}"
-        )
         affection = self.store.affection_info()
+        cap = self.store.daily_affection_cap()
+        gained = int(self.store.data.get("daily_counts", {}).get("affection_gain", 0))
+        ceiling = max(1, int(level["affection_ceiling"]))
+        affection_percent = min(100, int(affection["value"] / ceiling * 100))
+        daily_percent = min(100, int(gained / max(1, cap) * 100))
+        self.sidebar_affection_bar.setValue(affection_percent)
+        self.sidebar_affection_bar.setFormat(f"好感上限 {affection['value']}/{ceiling}%")
+        self.daily_affection_bar.setValue(daily_percent)
+        self.daily_affection_bar.setFormat(f"今日好感 {gained}/{cap}")
+        self.level_profile_label.setText(
+            "普通触摸只提升心情；好感需要完整关怀、专注或礼物慢慢建立。"
+        )
+        self.next_unlock_label.setText(next_unlock)
+        route_lines = []
+        for milestone in LEVEL_MILESTONES:
+            marker = "●" if level["level"] >= milestone["level"] else "○"
+            route_lines.append(
+                f"{marker} Lv.{milestone['level']} {milestone['title']} · "
+                f"好感上限 {milestone['affection_ceiling']}% · 日上限 {milestone['daily_affection_cap']}"
+            )
+        self.growth_route_label.setText("\n".join(route_lines))
         if affection["to_next"]:
             next_text = f"距离「{affection['next_title']}」还差 {affection['to_next']} 点。"
         else:
             next_text = "好感已经达到最高阶段，继续保持陪伴即可。"
-        cap = self.store.daily_affection_cap()
-        gained = int(self.store.data.get("daily_counts", {}).get("affection_gain", 0))
         self.affection_profile_label.setText(
             f"当前阶段：{affection['title']}（{affection['value']}%）。{next_text}\n"
             f"{affection['description']}\n今日好感：{gained}/{cap}。普通触摸不直接增加好感，需要完整关怀、专注或礼物。"
@@ -313,10 +371,48 @@ PAGE_STYLE = """
     font-size: 22px;
     font-weight: 900;
 }
+#levelHeroText {
+    color: #284f66;
+    font-size: 27px;
+    font-weight: 900;
+    line-height: 1.25;
+}
+#growthTitle {
+    color: #54c3e3;
+    font-size: 15px;
+    font-weight: 900;
+    letter-spacing: 0px;
+}
+#sideLabel, #routeText {
+    color: #567386;
+    font-size: 13px;
+    line-height: 1.35;
+}
+#sideSectionTitle {
+    color: #ff8ebc;
+    font-size: 16px;
+    font-weight: 900;
+}
+#unlockPill {
+    color: #284f66;
+    background: rgba(255, 255, 255, 180);
+    border: 1px solid #bde8f4;
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 13px;
+    font-weight: 800;
+}
 #sectionTitle {
     color: #2d566d;
     font-size: 18px;
     font-weight: 900;
+}
+#growthSidebar {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #f5fdff, stop:0.48 #ffffff, stop:1 #f4edff);
+    border: 1px solid #aee6f4;
+    border-radius: 10px;
+    padding: 12px;
 }
 #moduleCard {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -343,6 +439,9 @@ QProgressBar::chunk {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
         stop:0 #ffabc8, stop:0.45 #ffd374, stop:0.72 #8de1d0, stop:1 #63c7e7);
     border-radius: 10px;
+}
+#growthBar {
+    min-height: 24px;
 }
 #moduleAction {
     min-height: 38px;
