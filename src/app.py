@@ -686,7 +686,6 @@ class PolarBearPetApp(QMainWindow):
         self._page_factories = {}
         self._did_initial_page_show = False
         self._pet_user_hidden = False
-        self._pet_topmost_suspended = False
         self._pet_hotkey_text = (
             _normalized_hotkey_text(self.store.settings.get("pet_toggle_hotkey"))
             or DEFAULT_PET_TOGGLE_HOTKEY_TEXT
@@ -1489,6 +1488,8 @@ class PolarBearPetApp(QMainWindow):
         self.show()
         self.raise_()
         self.activateWindow()
+        if not self.pet_window.isVisible() and not self._pet_user_hidden:
+            self.show_pet_window(restore=True, activate=False)
         QTimer.singleShot(0, self._sync_pet_overlay_for_panel)
 
     def _handle_tray_activated(self, reason):
@@ -1639,37 +1640,55 @@ class PolarBearPetApp(QMainWindow):
     def _show_pet_on_startup(self):
         self.show_pet_window(restore=True)
 
+    def _panel_geometry_with_margin(self):
+        return self.frameGeometry().adjusted(-12, -12, 12, 12)
+
     def _pet_overlaps_panel(self):
         if not self.isVisible() or not self.pet_window.isVisible():
             return False
-        panel_rect = self.frameGeometry().adjusted(-8, -8, 8, 8)
-        pet_rect = self.pet_window.frameGeometry()
-        return panel_rect.intersects(pet_rect)
+        return self._panel_geometry_with_margin().intersects(self.pet_window.frameGeometry())
 
-    def _suspend_pet_overlay_for_panel(self):
-        if not bool(self.store.settings.get("always_on_top", True)):
-            return
-        if not self.pet_window.isVisible():
-            return
-        self._pet_topmost_suspended = True
-        self.pet_window.set_always_on_top(False)
-        self.pet_window.lower()
-        self.raise_()
+    def _pet_position_next_to_panel(self):
+        screen = QApplication.screenAt(self.frameGeometry().center()) or QApplication.primaryScreen()
+        area = screen.availableGeometry() if screen else None
+        if not area:
+            return self.pet_window.x(), self.pet_window.y()
+        panel = self._panel_geometry_with_margin()
+        pet_w = self.pet_window.width()
+        pet_h = self.pet_window.height()
+        gap = 18
+        preferred_y = max(area.top() + 16, min(self.pet_window.y(), area.bottom() - pet_h - 16))
+        candidates = [
+            (panel.right() + gap, preferred_y),
+            (panel.left() - pet_w - gap, preferred_y),
+            (area.right() - pet_w - 28, area.bottom() - pet_h - 40),
+            (area.left() + 28, area.bottom() - pet_h - 40),
+            (area.right() - pet_w - 28, area.top() + 28),
+            (area.left() + 28, area.top() + 28),
+        ]
+        for x, y in candidates:
+            x, y = self._clamped_pet_position(x, y)
+            candidate_rect = QRect(x, y, pet_w, pet_h)
+            if area.contains(candidate_rect) and not candidate_rect.intersects(panel):
+                return x, y
+        return self._clamped_pet_position(area.right() - pet_w - 28, area.bottom() - pet_h - 40)
 
-    def _restore_pet_overlay_after_panel(self):
-        if not self._pet_topmost_suspended:
+    def _move_pet_next_to_panel_if_needed(self):
+        if not self._pet_overlaps_panel():
             return
-        self._pet_topmost_suspended = False
-        if bool(self.store.settings.get("always_on_top", True)):
-            self.pet_window.set_always_on_top(True)
+        next_x, next_y = self._pet_position_next_to_panel()
+        if (next_x, next_y) != (self.pet_window.x(), self.pet_window.y()):
+            self.pet_window.move(next_x, next_y)
+            self.store.settings["pet_window_x"] = int(next_x)
+            self.store.settings["pet_window_y"] = int(next_y)
 
     def _sync_pet_overlay_for_panel(self):
-        if self.isVisible() and self.isActiveWindow() and self._pet_overlaps_panel():
-            self._suspend_pet_overlay_for_panel()
-        elif self.isVisible() and self.isActiveWindow() and self._pet_topmost_suspended:
-            self._restore_pet_overlay_after_panel()
-        elif not self.isActiveWindow():
-            self._restore_pet_overlay_after_panel()
+        if not self.pet_window.isVisible():
+            return
+        self.pet_window.set_always_on_top(bool(self.store.settings.get("always_on_top", True)))
+        if self.isVisible() and self.isActiveWindow():
+            self._move_pet_next_to_panel_if_needed()
+            self.pet_window.raise_()
 
     def changeEvent(self, event):
         super().changeEvent(event)
@@ -1687,7 +1706,6 @@ class PolarBearPetApp(QMainWindow):
             self.pet_window.showNormal()
         self.pet_window.show()
         if activate:
-            self._restore_pet_overlay_after_panel()
             self.pet_window.raise_()
             self.pet_window.activateWindow()
         else:
