@@ -89,6 +89,7 @@ class PolarBearPetWindow(QWidget):
         self._transition_action = None
         self._return_transitions = {}
         self._frame_bounds_cache = {}
+        self._loaded_frame_cache = {}
         self._action_name = "idle"
         self._frame_index = 0
         self._cycle_count = 0
@@ -121,7 +122,7 @@ class PolarBearPetWindow(QWidget):
         self._timer = QTimer(self)
         self._timer.setTimerType(Qt.PreciseTimer)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(16)
+        self._timer.start(self._timer_interval_for_action(self._current_action()))
 
     @property
     def mood(self):
@@ -252,8 +253,9 @@ class PolarBearPetWindow(QWidget):
             else:
                 source_frames = action.source_frames or action.frames
                 action.frames = self._scale_frames(source_frames)
-        self._rebuild_return_transitions()
         self._frame_bounds_cache.clear()
+        self._loaded_frame_cache.clear()
+        self._rebuild_return_transitions()
         self._warm_frame_cache()
         current_action = self._current_action()
         if current_action and current_action.frames:
@@ -471,16 +473,21 @@ class PolarBearPetWindow(QWidget):
         if not action.frame_paths:
             return None
 
-        scaled_frames = []
-        for file in action.frame_paths:
-            pixmap = self._load_scaled_frame_path(file)
-            if not pixmap.isNull():
-                scaled_frames.append(pixmap)
+        cache_key = tuple(str(file) for file in action.frame_paths)
+        scaled_frames = self._loaded_frame_cache.get(cache_key)
+        if scaled_frames is None:
+            scaled_frames = []
+            for file in action.frame_paths:
+                pixmap = self._load_scaled_frame_path(file)
+                if not pixmap.isNull():
+                    scaled_frames.append(pixmap)
+            if scaled_frames:
+                self._loaded_frame_cache[cache_key] = scaled_frames
         if not scaled_frames:
             return None
 
         action.source_frames = []
-        action.frames = scaled_frames * max(1, int(action.repeat or 1))
+        action.frames = list(scaled_frames) * max(1, int(action.repeat or 1))
         return action
 
     def _action_has_frames(self, action):
@@ -493,16 +500,13 @@ class PolarBearPetWindow(QWidget):
             "walk_left",
             "walk_right",
             "jump",
-            "drag",
             "sleep_prepare",
             "sleep",
-            "edge_left",
-            "edge_right",
         ]
         self._deferred_load_queue = [name for name in priorities if name in self._actions and name != self._action_name]
         self._deferred_loading = bool(self._deferred_load_queue)
         if self._deferred_loading:
-            QTimer.singleShot(700, self._load_next_deferred_action)
+            QTimer.singleShot(2200, self._load_next_deferred_action)
 
     def _load_next_deferred_action(self):
         if not self._deferred_load_queue:
@@ -515,46 +519,26 @@ class PolarBearPetWindow(QWidget):
         if self.isVisible() and action_name != self._action_name:
             self._ensure_action_loaded(action_name)
             self._rebuild_return_transitions()
-        delay = 420 if self._deferred_load_queue else 0
+        delay = 1100 if self._deferred_load_queue else 0
         if delay:
             QTimer.singleShot(delay, self._load_next_deferred_action)
         else:
             self._deferred_loading = False
 
     def _warm_frame_cache(self):
-        warm_frames = []
-        action = self._current_action()
-        if action:
-            warm_frames.extend(action.frames[:8])
-        if self._transition_action:
-            warm_frames.extend(self._transition_action.frames)
+        return
 
-        scratch = QPixmap()
-        painter = None
-        last_size = None
-        last_dpr = 1.0
-        for frame in warm_frames:
-            if frame.isNull():
-                continue
-            self._frame_alpha_bounds(frame)
-            size = frame.size()
-            dpr = frame.devicePixelRatio()
-            if size != last_size or abs(dpr - last_dpr) > 0.01:
-                if painter:
-                    painter.end()
-                scratch = QPixmap(size)
-                scratch.setDevicePixelRatio(dpr)
-                scratch.fill(Qt.transparent)
-                painter = QPainter(scratch)
-                last_size = size
-                last_dpr = dpr
-            else:
-                painter.setCompositionMode(QPainter.CompositionMode_Source)
-                painter.fillRect(scratch.rect(), Qt.transparent)
-                painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
-            painter.drawPixmap(0, 0, frame)
-        if painter:
-            painter.end()
+    def _timer_interval_for_action(self, action):
+        if not action:
+            return 24
+        return max(20, min(32, int(max(20, action.interval / 2))))
+
+    def _sync_timer_interval(self, action):
+        if not hasattr(self, "_timer"):
+            return
+        interval = self._timer_interval_for_action(action)
+        if self._timer.interval() != interval:
+            self._timer.setInterval(interval)
 
     def _random_idle_delay(self):
         return random.randint(36000, 68000)
@@ -784,6 +768,7 @@ class PolarBearPetWindow(QWidget):
             self._commit_walk_visual_offset(force=True)
         self._transition_action = transition
         self._action_name = "__transition__"
+        self._sync_timer_interval(transition)
         self._frame_index = 1 if len(transition.frames) > 1 else 0
         self._cycle_count = 0
         self._walk_frame_count = 0
@@ -820,6 +805,7 @@ class PolarBearPetWindow(QWidget):
             self._ensure_walk_headroom(action_name)
         self._transition_action = None
         self._action_name = action_name
+        self._sync_timer_interval(action)
         self._frame_index = self._start_frame_index(action_name, start_frame_index, action)
         self._cycle_count = 0
         self._walk_frame_count = 0
@@ -943,33 +929,36 @@ class PolarBearPetWindow(QWidget):
             logical_size.height(),
         )
 
-    def _visible_pet_rect(self):
+    def _visible_pet_rect(self, precise=False):
         frame = self._current_frame()
         if frame and not frame.isNull():
             draw_rect = self._frame_draw_rect(frame)
-            bounds = self._frame_alpha_bounds(frame)
-            rect = QRectF(
-                draw_rect.left() + bounds.left(),
-                draw_rect.top() + bounds.top(),
-                bounds.width(),
-                bounds.height(),
-            )
+            if precise:
+                bounds = self._frame_alpha_bounds(frame)
+                rect = QRectF(
+                    draw_rect.left() + bounds.left(),
+                    draw_rect.top() + bounds.top(),
+                    bounds.width(),
+                    bounds.height(),
+                )
+            else:
+                rect = draw_rect
         else:
             rect = QRectF(self._pet_draw_rect)
         pad = max(2, round(5 * self._scale))
         return rect.adjusted(-pad, -pad, pad, pad)
 
-    def _visible_pet_screen_rect(self, window_x=None, window_y=None):
+    def _visible_pet_screen_rect(self, window_x=None, window_y=None, precise=False):
         x = self.x() if window_x is None else int(window_x)
         y = self.y() if window_y is None else int(window_y)
-        return self._visible_pet_rect().translated(x, y)
+        return self._visible_pet_rect(precise=precise).translated(x, y)
 
-    def fit_position_to_visible_screen(self, x, y, margin=None):
+    def fit_position_to_visible_screen(self, x, y, margin=None, precise=False):
         area = self._available_screen_area()
         if not area:
             return int(x), int(y)
         margin = max(2, round(6 * self._scale)) if margin is None else int(margin)
-        rect = self._visible_pet_screen_rect(x, y)
+        rect = self._visible_pet_screen_rect(x, y, precise=precise)
         area_left = area.left()
         area_top = area.top()
         area_right = area.left() + area.width()
@@ -996,7 +985,7 @@ class PolarBearPetWindow(QWidget):
             return None
         threshold = max(8, int(self._edge_snap_threshold))
         margin = max(2, round(4 * self._scale))
-        rect = self._visible_pet_screen_rect()
+        rect = self._visible_pet_screen_rect(precise=True)
         area_left = area.left()
         area_top = area.top()
         area_right = area.left() + area.width()
@@ -1036,13 +1025,13 @@ class PolarBearPetWindow(QWidget):
         self.play_action(edge_action, transition=False)
         area = self._available_screen_area()
         if area:
-            rect = self._visible_pet_screen_rect()
+            rect = self._visible_pet_screen_rect(precise=True)
             next_x = self.x()
             if side == "left":
                 next_x += round(area.left() - rect.left())
             else:
                 next_x += round(area.left() + area.width() - rect.right())
-            next_x, next_y = self.fit_position_to_visible_screen(next_x, self.y(), margin=0)
+            next_x, next_y = self.fit_position_to_visible_screen(next_x, self.y(), margin=0, precise=True)
             if next_x != self.x() or next_y != self.y():
                 self.move(next_x, next_y)
         self._edge_stick_side = side
@@ -1180,6 +1169,18 @@ class PolarBearPetWindow(QWidget):
         else:
             self.play_action(action_name)
         self.interaction_requested.emit(action_name)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if hasattr(self, "_clock"):
+            self._clock.restart()
+        if hasattr(self, "_timer") and not self._timer.isActive():
+            self._timer.start(self._timer_interval_for_action(self._current_action()))
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        if hasattr(self, "_timer") and self._timer.isActive():
+            self._timer.stop()
 
     def paintEvent(self, event):
         painter = QPainter(self)

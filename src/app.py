@@ -687,6 +687,7 @@ class PolarBearPetApp(QMainWindow):
         self._did_initial_page_show = False
         self._pet_user_hidden = False
         self._pet_avoid_animation = None
+        self._pet_overlay_sync_pending = False
         self._pet_hotkey_text = (
             _normalized_hotkey_text(self.store.settings.get("pet_toggle_hotkey"))
             or DEFAULT_PET_TOGGLE_HOTKEY_TEXT
@@ -1090,15 +1091,15 @@ class PolarBearPetApp(QMainWindow):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._sync_responsive_layout()
-        QTimer.singleShot(0, self._sync_pet_overlay_for_panel)
+        self._request_pet_overlay_sync()
 
     def moveEvent(self, event):
         super().moveEvent(event)
-        QTimer.singleShot(0, self._sync_pet_overlay_for_panel)
+        self._request_pet_overlay_sync()
 
     def showEvent(self, event):
         super().showEvent(event)
-        QTimer.singleShot(0, self._sync_pet_overlay_for_panel)
+        self._request_pet_overlay_sync()
 
     def _sync_responsive_layout(self):
         if not getattr(self, "_sidebar_scroll", None):
@@ -1500,7 +1501,7 @@ class PolarBearPetApp(QMainWindow):
         self.activateWindow()
         if not self.pet_window.isVisible() and not self._pet_user_hidden:
             self.show_pet_window(restore=True, activate=False)
-        QTimer.singleShot(0, self._sync_pet_overlay_for_panel)
+        self._request_pet_overlay_sync()
 
     def _handle_tray_activated(self, reason):
         if reason == QSystemTrayIcon.Trigger:
@@ -1650,6 +1651,16 @@ class PolarBearPetApp(QMainWindow):
     def _show_pet_on_startup(self):
         self.show_pet_window(restore=True)
 
+    def _request_pet_overlay_sync(self, delay=0):
+        if self._pet_overlay_sync_pending:
+            return
+        self._pet_overlay_sync_pending = True
+        QTimer.singleShot(delay, self._run_pet_overlay_sync)
+
+    def _run_pet_overlay_sync(self):
+        self._pet_overlay_sync_pending = False
+        self._sync_pet_overlay_for_panel()
+
     def _panel_safe_geometry(self):
         return self.frameGeometry().adjusted(-16, -16, 16, 16)
 
@@ -1750,9 +1761,9 @@ class PolarBearPetApp(QMainWindow):
         super().changeEvent(event)
         if event.type() == QEvent.Type.ActivationChange:
             if self.isActiveWindow():
-                QTimer.singleShot(0, self._sync_pet_overlay_for_panel)
+                self._request_pet_overlay_sync()
             else:
-                QTimer.singleShot(160, self._sync_pet_overlay_for_panel)
+                self._request_pet_overlay_sync(160)
 
     def show_pet_window(self, checked=False, restore=True, activate=True):
         was_visible = self.pet_window.isVisible()
