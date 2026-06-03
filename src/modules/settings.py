@@ -24,6 +24,14 @@ from src.llm_client import LLMClient, LLM_PROVIDERS, normalize_llm_config
 DEFAULT_HOTKEY = "Ctrl+Alt+B"
 
 
+class _WheelSafeComboBox(QComboBox):
+    def wheelEvent(self, event):
+        if self.view().isVisible():
+            super().wheelEvent(event)
+        else:
+            event.ignore()
+
+
 class SettingsPage(QWidget):
     llm_test_ready = Signal(bool, str)
 
@@ -231,13 +239,13 @@ class SettingsPage(QWidget):
 
         form = QGridLayout()
         form.setSpacing(8)
-        self.llm_provider = QComboBox()
+        self.llm_provider = _WheelSafeComboBox()
         self.llm_provider.setObjectName("settingCombo")
         for key, provider in LLM_PROVIDERS.items():
             self.llm_provider.addItem(provider["name"], key)
         self.llm_provider.currentIndexChanged.connect(self._llm_provider_changed)
 
-        self.llm_model = QComboBox()
+        self.llm_model = _WheelSafeComboBox()
         self.llm_model.setObjectName("settingCombo")
         self.llm_model.setEditable(True)
 
@@ -428,9 +436,12 @@ class SettingsPage(QWidget):
         models = LLM_PROVIDERS.get(provider_key, {}).get("models", [])
         self.llm_model.addItems(models)
         if current_model:
-            if self.llm_model.findText(current_model) < 0:
-                self.llm_model.addItem(current_model)
-            self.llm_model.setCurrentText(current_model)
+            if self.llm_model.findText(current_model) >= 0:
+                self.llm_model.setCurrentText(current_model)
+            elif models:
+                self.llm_model.setCurrentText(models[0])
+            else:
+                self.llm_model.setEditText(current_model)
         elif models:
             self.llm_model.setCurrentText(models[0])
 

@@ -1047,7 +1047,7 @@ class PolarBearPetWindow(QWidget):
         raw_y = self.y() + dy
         next_x, next_y = self.fit_position_to_visible_screen(raw_x, raw_y)
         hit_horizontal_edge = bool(dx and next_x != int(raw_x))
-        if turn_on_edge and hit_horizontal_edge and self._action_name in {"walk_left", "walk_right"}:
+        if hit_horizontal_edge and self._action_name in {"walk_left", "walk_right"}:
             self._walk_visual_offset_x = 0.0
             self._turn_walk_direction()
             return 0
