@@ -22,6 +22,7 @@ from src.llm_client import LLMClient, LLM_PROVIDERS, normalize_llm_config
 
 
 DEFAULT_HOTKEY = "Ctrl+Alt+B"
+DEFAULT_CORNER_HOTKEY = "Ctrl+Alt+M"
 
 
 class _WheelSafeComboBox(QComboBox):
@@ -35,12 +36,24 @@ class _WheelSafeComboBox(QComboBox):
 class SettingsPage(QWidget):
     llm_test_ready = Signal(bool, str)
 
-    def __init__(self, store, pet_window, get_hotkey=None, set_hotkey=None):
+    def __init__(
+        self,
+        store,
+        pet_window,
+        get_hotkey=None,
+        set_hotkey=None,
+        get_corner_hotkey=None,
+        set_corner_hotkey=None,
+    ):
         super().__init__()
         self.store = store
         self.pet_window = pet_window
         self.get_hotkey = get_hotkey or (lambda: self.store.settings.get("pet_toggle_hotkey", DEFAULT_HOTKEY))
         self.set_hotkey = set_hotkey or self._fallback_set_hotkey
+        self.get_corner_hotkey = get_corner_hotkey or (
+            lambda: self.store.settings.get("pet_corner_hotkey", DEFAULT_CORNER_HOTKEY)
+        )
+        self.set_corner_hotkey = set_corner_hotkey or self._fallback_set_corner_hotkey
         self.scale_value = None
         self.opacity_value = None
         self.edge_threshold_value = None
@@ -48,6 +61,9 @@ class SettingsPage(QWidget):
         self.hotkey_value = None
         self.hotkey_editor = None
         self.hotkey_status = None
+        self.corner_hotkey_value = None
+        self.corner_hotkey_editor = None
+        self.corner_hotkey_status = None
         self.scale_slider = None
         self.opacity_slider = None
         self.edge_threshold_slider = None
@@ -188,9 +204,10 @@ class SettingsPage(QWidget):
         card = QFrame()
         card.setObjectName("moduleCard")
         layout = QVBoxLayout(card)
+        layout.setSpacing(10)
         title = QLabel("桌宠快捷键")
         title.setObjectName("cardTitle")
-        desc = QLabel("点击录制框后按下新的组合键，再保存即可。建议使用 Ctrl / Alt / Shift 加字母或功能键。")
+        desc = QLabel("显示 / 隐藏会让北极熊完全不见；圆圈待机会立刻把北极熊收成右下角小圆点，再按一次召回。")
         desc.setWordWrap(True)
         desc.setObjectName("taskItem")
         self.hotkey_value = QLabel()
@@ -202,6 +219,17 @@ class SettingsPage(QWidget):
         self.hotkey_status = QLabel("保存后会立即应用到全局快捷键。")
         self.hotkey_status.setWordWrap(True)
         self.hotkey_status.setObjectName("taskItem")
+
+        self.corner_hotkey_value = QLabel()
+        self.corner_hotkey_value.setObjectName("taskItem")
+        self.corner_hotkey_editor = QKeySequenceEdit()
+        self.corner_hotkey_editor.setObjectName("hotkeyEditor")
+        self.corner_hotkey_editor.setClearButtonEnabled(True)
+        self.corner_hotkey_editor.setKeySequence(QKeySequence(self.get_corner_hotkey()))
+        self.corner_hotkey_status = QLabel("默认 Ctrl+Alt+M，可以不用等待闲置计时就进入右下角圆圈。")
+        self.corner_hotkey_status.setWordWrap(True)
+        self.corner_hotkey_status.setObjectName("taskItem")
+
         row = QHBoxLayout()
         save = QPushButton("保存快捷键")
         save.setCursor(Qt.PointingHandCursor)
@@ -213,12 +241,30 @@ class SettingsPage(QWidget):
         reset.clicked.connect(self._reset_hotkey)
         row.addWidget(save)
         row.addWidget(reset)
+
+        corner_row = QHBoxLayout()
+        save_corner = QPushButton("保存圆圈待机键")
+        save_corner.setCursor(Qt.PointingHandCursor)
+        save_corner.setObjectName("moduleAction")
+        save_corner.clicked.connect(self._save_corner_hotkey)
+        reset_corner = QPushButton("恢复 Ctrl+Alt+M")
+        reset_corner.setCursor(Qt.PointingHandCursor)
+        reset_corner.setObjectName("moduleAction")
+        reset_corner.clicked.connect(self._reset_corner_hotkey)
+        corner_row.addWidget(save_corner)
+        corner_row.addWidget(reset_corner)
+
         layout.addWidget(title)
         layout.addWidget(desc)
         layout.addWidget(self.hotkey_value)
         layout.addWidget(self.hotkey_editor)
         layout.addWidget(self.hotkey_status)
         layout.addLayout(row)
+        layout.addSpacing(6)
+        layout.addWidget(self.corner_hotkey_value)
+        layout.addWidget(self.corner_hotkey_editor)
+        layout.addWidget(self.corner_hotkey_status)
+        layout.addLayout(corner_row)
         return card
 
     def _llm_card(self):
@@ -329,6 +375,9 @@ class SettingsPage(QWidget):
         if self.hotkey_value:
             hotkey = self.get_hotkey() or DEFAULT_HOTKEY
             self.hotkey_value.setText(f"当前显示 / 隐藏快捷键：{hotkey}")
+        if self.corner_hotkey_value:
+            corner_hotkey = self.get_corner_hotkey() or DEFAULT_CORNER_HOTKEY
+            self.corner_hotkey_value.setText(f"当前圆圈待机 / 召回快捷键：{corner_hotkey}")
         self._refresh_llm_controls()
 
     def _preview_scale(self, value):
@@ -388,8 +437,18 @@ class SettingsPage(QWidget):
         self.store.set_setting("pet_toggle_hotkey", hotkey)
         return True, f"快捷键已保存为 {hotkey}。"
 
+    def _fallback_set_corner_hotkey(self, hotkey):
+        self.store.set_setting("pet_corner_hotkey", hotkey)
+        return True, f"圆圈待机快捷键已保存为 {hotkey}。"
+
     def _editor_hotkey_text(self):
         sequence = self.hotkey_editor.keySequence()
+        if sequence.isEmpty():
+            return ""
+        return sequence.toString(QKeySequence.SequenceFormat.PortableText)
+
+    def _corner_editor_hotkey_text(self):
+        sequence = self.corner_hotkey_editor.keySequence()
         if sequence.isEmpty():
             return ""
         return sequence.toString(QKeySequence.SequenceFormat.PortableText)
@@ -406,6 +465,19 @@ class SettingsPage(QWidget):
     def _reset_hotkey(self):
         self.hotkey_editor.setKeySequence(QKeySequence(DEFAULT_HOTKEY))
         self._save_hotkey()
+
+    def _save_corner_hotkey(self):
+        hotkey = self._corner_editor_hotkey_text()
+        ok, message = self.set_corner_hotkey(hotkey)
+        self.corner_hotkey_status.setText(message)
+        if ok:
+            current = self.get_corner_hotkey() or hotkey
+            self.corner_hotkey_editor.setKeySequence(QKeySequence(current))
+            self.refresh()
+
+    def _reset_corner_hotkey(self):
+        self.corner_hotkey_editor.setKeySequence(QKeySequence(DEFAULT_CORNER_HOTKEY))
+        self._save_corner_hotkey()
 
     def _refresh_llm_controls(self):
         if not self.llm_provider:
@@ -508,6 +580,8 @@ class SettingsPage(QWidget):
         self.pet_window.set_edge_snap(True, 48)
         self.hotkey_editor.setKeySequence(QKeySequence(DEFAULT_HOTKEY))
         self.set_hotkey(DEFAULT_HOTKEY)
+        self.corner_hotkey_editor.setKeySequence(QKeySequence(DEFAULT_CORNER_HOTKEY))
+        self.set_corner_hotkey(DEFAULT_CORNER_HOTKEY)
         self.scale_slider.setValue(50)
         self.opacity_slider.setValue(100)
         self.edge_threshold_slider.setValue(48)

@@ -49,7 +49,9 @@ MOD_SHIFT = 0x0004
 MOD_WIN = 0x0008
 MOD_NOREPEAT = 0x4000
 PET_TOGGLE_HOTKEY_ID = 0x1472
+PET_CORNER_HOTKEY_ID = 0x1473
 DEFAULT_PET_TOGGLE_HOTKEY_TEXT = "Ctrl+Alt+B"
+DEFAULT_PET_CORNER_HOTKEY_TEXT = "Ctrl+Alt+M"
 
 
 def _trim_transparent_pixmap(pixmap, margin=6):
@@ -808,6 +810,7 @@ class PolarBearPetApp(QMainWindow):
         self.hero_show_pet_button = None
         self.tray_show_pet_action = None
         self.tray_toggle_pet_action = None
+        self.tray_corner_pet_action = None
         self.top_time_label = None
         self.clock_label = None
         self.course_title_label = None
@@ -836,8 +839,14 @@ class PolarBearPetApp(QMainWindow):
             _normalized_hotkey_text(self.store.settings.get("pet_toggle_hotkey"))
             or DEFAULT_PET_TOGGLE_HOTKEY_TEXT
         )
+        self._pet_corner_hotkey_text = (
+            _normalized_hotkey_text(self.store.settings.get("pet_corner_hotkey"))
+            or DEFAULT_PET_CORNER_HOTKEY_TEXT
+        )
         self._global_hotkey_registered = False
+        self._global_corner_hotkey_registered = False
         self._local_pet_shortcut = None
+        self._local_pet_corner_shortcut = None
         self._touch_burst_count = 0
         self._touch_burst_timer = QTimer(self)
         self._touch_burst_timer.setSingleShot(True)
@@ -902,6 +911,8 @@ class PolarBearPetApp(QMainWindow):
                         self.pet_window,
                         self.current_pet_hotkey,
                         self.set_pet_toggle_hotkey,
+                        self.current_pet_corner_hotkey,
+                        self.set_pet_corner_hotkey,
                     )
                 ),
                 False,
@@ -1941,6 +1952,9 @@ class PolarBearPetApp(QMainWindow):
         toggle_pet = QAction(self)
         self.tray_toggle_pet_action = toggle_pet
         toggle_pet.triggered.connect(self.toggle_pet_window)
+        corner_pet = QAction(self)
+        self.tray_corner_pet_action = corner_pet
+        corner_pet.triggered.connect(self.toggle_pet_corner_standby)
         hide_pet = QAction("隐藏桌宠", self)
         hide_pet.triggered.connect(self.hide_pet_window)
         feed = QAction("投喂极地鱼干", self)
@@ -1954,7 +1968,7 @@ class PolarBearPetApp(QMainWindow):
         quit_action = QAction("退出", self)
         quit_action.triggered.connect(QApplication.instance().quit)
 
-        for action in (show_console, show_pet, toggle_pet, hide_pet, feed, focus, cancel_focus, rest):
+        for action in (show_console, show_pet, toggle_pet, corner_pet, hide_pet, feed, focus, cancel_focus, rest):
             menu.addAction(action)
         menu.addSeparator()
         menu.addAction(quit_action)
@@ -1964,7 +1978,9 @@ class PolarBearPetApp(QMainWindow):
 
     def _setup_pet_hotkeys(self):
         self._set_local_pet_shortcut(self._pet_hotkey_text)
+        self._set_local_pet_corner_shortcut(self._pet_corner_hotkey_text)
         self._register_global_pet_hotkey()
+        self._register_global_corner_hotkey()
         self._sync_hotkey_labels()
 
     def _set_local_pet_shortcut(self, hotkey_text):
@@ -1974,6 +1990,14 @@ class PolarBearPetApp(QMainWindow):
             self._local_pet_shortcut.activated.connect(self.toggle_pet_window)
         else:
             self._local_pet_shortcut.setKey(QKeySequence(hotkey_text))
+
+    def _set_local_pet_corner_shortcut(self, hotkey_text):
+        if self._local_pet_corner_shortcut is None:
+            self._local_pet_corner_shortcut = QShortcut(QKeySequence(hotkey_text), self)
+            self._local_pet_corner_shortcut.setContext(Qt.ApplicationShortcut)
+            self._local_pet_corner_shortcut.activated.connect(self.toggle_pet_corner_standby)
+        else:
+            self._local_pet_corner_shortcut.setKey(QKeySequence(hotkey_text))
 
     def _register_global_pet_hotkey(self):
         self._unregister_global_pet_hotkey()
@@ -1994,6 +2018,25 @@ class PolarBearPetApp(QMainWindow):
         self._global_hotkey_registered = bool(ok)
         return self._global_hotkey_registered
 
+    def _register_global_corner_hotkey(self):
+        self._unregister_global_corner_hotkey()
+        self._global_corner_hotkey_registered = False
+        if not sys.platform.startswith("win"):
+            return True
+        parts = _windows_hotkey_parts(self._pet_corner_hotkey_text)
+        if not parts:
+            return False
+        modifiers, vk = parts
+        try:
+            hwnd = wintypes.HWND(int(self.winId()))
+            ok = ctypes.windll.user32.RegisterHotKey(hwnd, PET_CORNER_HOTKEY_ID, modifiers | MOD_NOREPEAT, vk)
+            if not ok:
+                ok = ctypes.windll.user32.RegisterHotKey(hwnd, PET_CORNER_HOTKEY_ID, modifiers, vk)
+        except (AttributeError, OSError, TypeError, ValueError):
+            ok = False
+        self._global_corner_hotkey_registered = bool(ok)
+        return self._global_corner_hotkey_registered
+
     def _unregister_global_pet_hotkey(self):
         if not self._global_hotkey_registered or not sys.platform.startswith("win"):
             return
@@ -2003,21 +2046,36 @@ class PolarBearPetApp(QMainWindow):
             pass
         self._global_hotkey_registered = False
 
+    def _unregister_global_corner_hotkey(self):
+        if not self._global_corner_hotkey_registered or not sys.platform.startswith("win"):
+            return
+        try:
+            ctypes.windll.user32.UnregisterHotKey(wintypes.HWND(int(self.winId())), PET_CORNER_HOTKEY_ID)
+        except (AttributeError, OSError, TypeError, ValueError):
+            pass
+        self._global_corner_hotkey_registered = False
+
     def _sync_hotkey_labels(self):
         hotkey = self._pet_hotkey_text
+        corner_hotkey = self._pet_corner_hotkey_text
         if self.pet_toggle_button:
             self.pet_toggle_button.setText(f"显示 / 隐藏桌宠  {hotkey}")
         if self.hero_show_pet_button:
             self.hero_show_pet_button.setText(f"唤出桌宠  {hotkey}")
         if self.tray_icon:
-            self.tray_icon.setToolTip(f"北极熊桌面宠物\n{hotkey} 显示/隐藏")
+            self.tray_icon.setToolTip(f"北极熊桌面宠物\n{hotkey} 显示/隐藏\n{corner_hotkey} 圆圈待机")
         if self.tray_show_pet_action:
             self.tray_show_pet_action.setText(f"唤出桌宠  {hotkey}")
         if self.tray_toggle_pet_action:
             self.tray_toggle_pet_action.setText(f"显示 / 隐藏桌宠  {hotkey}")
+        if self.tray_corner_pet_action:
+            self.tray_corner_pet_action.setText(f"圆圈待机 / 召回  {corner_hotkey}")
 
     def current_pet_hotkey(self):
         return self._pet_hotkey_text
+
+    def current_pet_corner_hotkey(self):
+        return self._pet_corner_hotkey_text
 
     def set_pet_toggle_hotkey(self, hotkey_text):
         normalized = _normalized_hotkey_text(hotkey_text)
@@ -2025,6 +2083,8 @@ class PolarBearPetApp(QMainWindow):
             return False, "快捷键无效：请至少包含 Ctrl / Alt / Shift / Win 中的一个修饰键。"
         if not _windows_hotkey_parts(normalized):
             return False, "快捷键无效：暂不支持这个按键，请换成字母、数字、方向键或 F1-F24。"
+        if normalized == self._pet_corner_hotkey_text:
+            return False, "这个组合键已经用于圆圈待机，请换一个。"
 
         old_hotkey = self._pet_hotkey_text
         self._pet_hotkey_text = normalized
@@ -2041,15 +2101,44 @@ class PolarBearPetApp(QMainWindow):
         self._sync_hotkey_labels()
         return True, f"快捷键已更新为 {normalized}。"
 
+    def set_pet_corner_hotkey(self, hotkey_text):
+        normalized = _normalized_hotkey_text(hotkey_text)
+        if not normalized:
+            return False, "快捷键无效：请至少包含 Ctrl / Alt / Shift / Win 中的一个修饰键。"
+        if not _windows_hotkey_parts(normalized):
+            return False, "快捷键无效：暂不支持这个按键，请换成字母、数字、方向键或 F1-F24。"
+        if normalized == self._pet_hotkey_text:
+            return False, "这个组合键已经用于显示 / 隐藏桌宠，请换一个。"
+
+        old_hotkey = self._pet_corner_hotkey_text
+        self._pet_corner_hotkey_text = normalized
+        self._set_local_pet_corner_shortcut(normalized)
+        ok = self._register_global_corner_hotkey()
+        if sys.platform.startswith("win") and not ok:
+            self._pet_corner_hotkey_text = old_hotkey
+            self._set_local_pet_corner_shortcut(old_hotkey)
+            self._register_global_corner_hotkey()
+            self._sync_hotkey_labels()
+            return False, f"{normalized} 注册失败，可能已经被其他软件占用。"
+
+        self.store.set_setting("pet_corner_hotkey", normalized)
+        self._sync_hotkey_labels()
+        return True, f"圆圈待机快捷键已更新为 {normalized}。"
+
     def nativeEvent(self, event_type, message):
         if sys.platform.startswith("win"):
             try:
                 msg = wintypes.MSG.from_address(int(message))
             except (TypeError, ValueError):
                 msg = None
-            if msg and msg.message == WM_HOTKEY and int(msg.wParam) == PET_TOGGLE_HOTKEY_ID:
-                self.toggle_pet_window()
-                return True, 0
+            if msg and msg.message == WM_HOTKEY:
+                hotkey_id = int(msg.wParam)
+                if hotkey_id == PET_TOGGLE_HOTKEY_ID:
+                    self.toggle_pet_window()
+                    return True, 0
+                if hotkey_id == PET_CORNER_HOTKEY_ID:
+                    self.toggle_pet_corner_standby()
+                    return True, 0
         return False, 0
 
     def _show_console(self):
@@ -2202,6 +2291,8 @@ class PolarBearPetApp(QMainWindow):
         self.pet_window.move(x, y)
 
     def _save_pet_position(self):
+        if getattr(self.pet_window, "_corner_hidden", False) or getattr(self.pet_window, "_corner_dot_mode", False):
+            return
         self.store.settings["pet_window_x"] = int(self.pet_window.x())
         self.store.settings["pet_window_y"] = int(self.pet_window.y())
 
@@ -2332,7 +2423,21 @@ class PolarBearPetApp(QMainWindow):
             else:
                 self._request_pet_overlay_sync(160)
 
+    def _cancel_pet_corner_animation(self):
+        animation = getattr(self.pet_window, "_corner_animation", None)
+        if animation:
+            animation.stop()
+            self.pet_window._corner_animation = None
+        self.pet_window._external_window_motion = False
+
     def show_pet_window(self, checked=False, restore=True, activate=True, sync_overlay=True):
+        if getattr(self.pet_window, "_corner_hidden", False) or getattr(self.pet_window, "_is_corner_animating", lambda: False)():
+            if not self.pet_window.isVisible():
+                self.pet_window.show()
+            self._pause_pet_overlay_sync(1600)
+            self.pet_window.reveal_from_corner()
+            self._pet_user_hidden = False
+            return
         was_visible = self.pet_window.isVisible()
         if restore and not was_visible:
             self._restore_pet_position()
@@ -2349,12 +2454,17 @@ class PolarBearPetApp(QMainWindow):
 
     def hide_pet_window(self, checked=False):
         if self.pet_window.isVisible():
+            if getattr(self.pet_window, "_is_corner_animating", lambda: False)() and not getattr(
+                self.pet_window, "_corner_hidden", False
+            ):
+                self._cancel_pet_corner_animation()
             self._save_pet_position()
         self.pet_window.hide()
         self._pet_user_hidden = True
 
     def closeEvent(self, event):
         self._unregister_global_pet_hotkey()
+        self._unregister_global_corner_hotkey()
         self._save_pet_position()
         self.store.save()
         self.pet_window.close()
@@ -2363,8 +2473,27 @@ class PolarBearPetApp(QMainWindow):
     def toggle_pet_window(self):
         if self.pet_window.isVisible() and not self._pet_user_hidden:
             self.hide_pet_window()
-        else:
-            self.show_pet_window()
+            return
+        self.show_pet_window()
+
+    def toggle_pet_corner_standby(self):
+        if self._pet_user_hidden and not self.pet_window.isVisible():
+            self._cancel_pet_corner_animation()
+
+        if getattr(self.pet_window, "_corner_hidden", False) or getattr(
+            self.pet_window, "_is_corner_animating", lambda: False
+        )():
+            self.show_pet_window(restore=False, activate=False, sync_overlay=False)
+            return
+
+        if not self.pet_window.isVisible():
+            self.show_pet_window(restore=True, activate=False, sync_overlay=False)
+        self._pet_user_hidden = False
+        self._pause_pet_overlay_sync(2600)
+        self.pet_window.hide_choice_bubble()
+        if not self.pet_window.hide_in_corner():
+            self.pet_window._clear_bubble()
+            self.pet_window.hide_in_corner()
 
 
 APP_STYLE = """

@@ -121,6 +121,9 @@ class PolarBearPetWindow(QWidget):
         self._corner_hide_side = ""
         self._corner_animation = None
         self._corner_dot_mode = False
+        self._corner_dot_base_pos = QPoint()
+        self._corner_dot_motion_phase = 0.0
+        self._corner_dot_move_elapsed = 0
         self._external_window_motion = False
         self._idle_events_until_sleep = random.randint(2, 4)
         self._random_action_pool = []
@@ -761,7 +764,7 @@ class PolarBearPetWindow(QWidget):
         return random.randint(22000, 38000)
 
     def _random_roam_delay(self):
-        return random.randint(5200, 9800)
+        return random.randint(16000, 30000)
 
     def _random_corner_hide_delay(self):
         return random.randint(72000, 128000)
@@ -875,6 +878,11 @@ class PolarBearPetWindow(QWidget):
         if self._corner_hidden:
             if self._corner_dot_mode:
                 self._choice_phase = (self._choice_phase + delta_ms / 520.0) % (math.pi * 2)
+                self._corner_dot_motion_phase = (self._corner_dot_motion_phase + delta_ms / 1800.0) % (math.pi * 2)
+                self._corner_dot_move_elapsed += delta_ms
+                if self._corner_dot_move_elapsed >= 140:
+                    self._corner_dot_move_elapsed = 0
+                    self._move_corner_dot()
                 should_update = True
             if should_update:
                 self.update()
@@ -895,14 +903,6 @@ class PolarBearPetWindow(QWidget):
             if self._next_random_action <= 0:
                 self._play_random_action()
                 return
-
-        if (
-            self._action_name == "idle"
-            and not self._bubble_text
-            and self._pose_settle_cooldown_ms <= 0
-            and self._settle_pose_visual_offset(max_step=2)
-        ):
-            should_update = True
 
         if should_update:
             self.update()
@@ -970,36 +970,7 @@ class PolarBearPetWindow(QWidget):
             self._walk_visual_offset_x = 0.0
 
     def _settle_pose_visual_offset(self, max_step=10):
-        if (
-            self._corner_dot_mode
-            or self._external_window_motion
-            or self._is_dragging
-            or self._choice_options
-        ):
-            return False
-        offset = getattr(self, "_pose_visual_offset", QPointF(0.0, 0.0))
-        if abs(offset.x()) < 0.75 and abs(offset.y()) < 0.75:
-            if abs(offset.x()) > 0.001 or abs(offset.y()) > 0.001:
-                self._pose_visual_offset = QPointF(0.0, 0.0)
-                return True
-            return False
-
-        def step(value):
-            if abs(value) < 0.75:
-                return 0
-            amount = int(round(value))
-            if amount == 0:
-                amount = 1 if value > 0 else -1
-            return max(-max_step, min(max_step, amount))
-
-        move_x = step(offset.x())
-        move_y = step(offset.y())
-        if not move_x and not move_y:
-            return False
-        self.move(self.x() + move_x, self.y() + move_y)
-        self._pose_visual_offset -= QPointF(move_x, move_y)
-        self._screen_area_cache = None
-        return True
+        return False
 
     def _play_random_action(self):
         self._next_random_action = self._random_idle_delay()
@@ -1106,6 +1077,41 @@ class PolarBearPetWindow(QWidget):
         y = area.top() + area.height() - size - margin
         return QPoint(int(x), int(y))
 
+    def _corner_dot_motion_position(self):
+        area = self._available_screen_area()
+        size = self._corner_dot_size()
+        base = QPoint(self._corner_dot_base_pos) if not self._corner_dot_base_pos.isNull() else self._corner_dot_target_position("right")
+        if not area:
+            return base
+        phase = self._corner_dot_motion_phase
+        amplitude_x = max(1, round(2.4 * self._scale))
+        amplitude_y = max(1, round(1.8 * self._scale))
+        drift_x = round(math.sin(phase * 0.62) * amplitude_x)
+        drift_y = round(math.cos(phase * 0.88) * amplitude_y)
+        margin = max(6, round(10 * self._scale))
+        x = max(area.left() + margin, min(area.left() + area.width() - size - margin, base.x() + drift_x))
+        y = max(area.top() + margin, min(area.top() + area.height() - size - margin, base.y() + drift_y))
+        return QPoint(int(x), int(y))
+
+    def _move_corner_dot(self):
+        if not self._corner_dot_mode or self._external_window_motion:
+            return
+        target = self._corner_dot_motion_position()
+        if (self.pos() - target).manhattanLength() >= 2:
+            self.move(target)
+
+    def _set_corner_dot_base_position(self, point):
+        area = self._available_screen_area()
+        size = self._corner_dot_size()
+        if area:
+            margin = max(6, round(10 * self._scale))
+            x = max(area.left() + margin, min(area.left() + area.width() - size - margin, int(point.x())))
+            y = max(area.top() + margin, min(area.top() + area.height() - size - margin, int(point.y())))
+            self._corner_dot_base_pos = QPoint(x, y)
+        else:
+            self._corner_dot_base_pos = QPoint(int(point.x()), int(point.y()))
+        self.move(self._corner_dot_base_pos)
+
     def _enter_corner_dot_mode(self, side):
         self._corner_dot_mode = True
         self._external_window_motion = False
@@ -1120,7 +1126,10 @@ class PolarBearPetWindow(QWidget):
         self._pose_visual_offset = QPointF(0.0, 0.0)
         size = self._corner_dot_size()
         self.setFixedSize(size, size)
-        self.move(self._corner_dot_target_position(side))
+        self._corner_dot_motion_phase = 0.0
+        self._corner_dot_move_elapsed = 0
+        self._corner_dot_base_pos = self._corner_dot_target_position(side)
+        self.move(self._corner_dot_base_pos)
         self.update()
 
     def _leave_corner_dot_mode(self, side):
@@ -1130,6 +1139,8 @@ class PolarBearPetWindow(QWidget):
         self._configure_geometry()
         self._walk_visual_offset_x = 0.0
         self._pose_visual_offset = QPointF(0.0, 0.0)
+        self._corner_dot_base_pos = QPoint()
+        self._corner_dot_move_elapsed = 0
         self.move(self._corner_target_position(side, visible_ratio=0.18))
         self.update()
 
@@ -1164,7 +1175,7 @@ class PolarBearPetWindow(QWidget):
         self.hide_choice_bubble()
         self._clear_bubble()
         rect = self._visible_pet_screen_rect(precise=True)
-        side = "left" if rect.center().x() <= area.left() + area.width() / 2 else "right"
+        side = "right"
         self._corner_hidden = True
         self._corner_hide_side = side
         self._next_corner_hide = self._random_corner_hide_delay()
@@ -1610,6 +1621,22 @@ class PolarBearPetWindow(QWidget):
         return next_x - old_x
 
     def mousePressEvent(self, event):
+        if self._corner_dot_mode and event.button() == Qt.LeftButton:
+            self.interaction_requested.emit("pet_press")
+            self._reset_autonomy_timers(hide_delay=max(self._next_corner_hide, 65000))
+            self._click_action_token += 1
+            self._press_position = event.globalPosition().toPoint()
+            self._drag_position = self._press_position - self.frameGeometry().topLeft()
+            self._is_dragging = False
+            self._drag_hold_frame = None
+            event.accept()
+            return
+        if self._corner_dot_mode and event.button() == Qt.RightButton:
+            self.interaction_requested.emit("pet_press")
+            self.reveal_from_corner()
+            self._ignore_next_click_release = True
+            event.accept()
+            return
         if event.button() in {Qt.LeftButton, Qt.RightButton} and (self._corner_hidden or self._is_corner_animating()):
             self.interaction_requested.emit("pet_press")
             self.reveal_from_corner()
@@ -1652,6 +1679,19 @@ class PolarBearPetWindow(QWidget):
             event.accept()
 
     def mouseMoveEvent(self, event):
+        if self._corner_dot_mode and event.buttons() & Qt.LeftButton:
+            current_position = event.globalPosition().toPoint()
+            if not self._is_dragging:
+                if (current_position - self._press_position).manhattanLength() < QApplication.startDragDistance():
+                    event.accept()
+                    return
+                self._is_dragging = True
+                self._click_action_token += 1
+                self.interaction_requested.emit("drag")
+            self._corner_dot_motion_phase = 0.0
+            self._set_corner_dot_base_position(current_position - self._drag_position)
+            event.accept()
+            return
         if self._choice_options:
             hover_key = self._choice_key_at(event.position())
             if hover_key != self._choice_hover_key:
@@ -1674,6 +1714,21 @@ class PolarBearPetWindow(QWidget):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
+            if self._corner_dot_mode:
+                if self._is_dragging:
+                    self._is_dragging = False
+                    self._click_action_token += 1
+                    self._corner_dot_base_pos = QPoint(self.pos())
+                    self._corner_dot_move_elapsed = 0
+                    self.interaction_requested.emit("drag_end")
+                elif self._ignore_next_click_release:
+                    self._ignore_next_click_release = False
+                    self._click_action_token += 1
+                else:
+                    self._click_action_token += 1
+                    self.reveal_from_corner()
+                event.accept()
+                return
             if self._choice_options:
                 key = self._choice_key_at(event.position()) if self._choice_pressing else ""
                 if key != self._choice_pressed_key:
@@ -1841,7 +1896,11 @@ class PolarBearPetWindow(QWidget):
         action = self._current_action()
         if not action or not action.frames:
             return None
-        return action.frames[self._frame_index % len(action.frames)]
+        if action.loop:
+            index = self._frame_index % len(action.frames)
+        else:
+            index = max(0, min(self._frame_index, len(action.frames) - 1))
+        return action.frames[index]
 
     def _draw_frame(self, painter, frame):
         painter.drawPixmap(self._frame_draw_rect(frame).topLeft(), frame)

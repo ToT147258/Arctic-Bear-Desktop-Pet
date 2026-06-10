@@ -156,6 +156,7 @@ DEFAULT_DATA = {
         "edge_snap_enabled": True,
         "edge_snap_threshold": 48,
         "pet_toggle_hotkey": "Ctrl+Alt+B",
+        "pet_corner_hotkey": "Ctrl+Alt+M",
         "companion_goal_minutes": 45,
         "pat_multi_click_talk_threshold": 6,
         "llm": deepcopy(LLM_DEFAULT_CONFIG),
@@ -975,6 +976,7 @@ class PetDataStore(QObject):
             "edge_snap_enabled": "贴边吸附",
             "edge_snap_threshold": "贴边距离",
             "pet_toggle_hotkey": "桌宠快捷键",
+            "pet_corner_hotkey": "圆圈待机快捷键",
             "pat_multi_click_talk_threshold": "连续互动阈值",
         }
         self.add_log("设置", f"{labels.get(key, key)}已更新。")
