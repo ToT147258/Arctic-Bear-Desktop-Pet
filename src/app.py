@@ -1,12 +1,13 @@
 import ctypes
 import random
 import sys
+import threading
 from datetime import datetime
 from math import cos, pi, sin
 from pathlib import Path
 from ctypes import wintypes
 
-from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QPropertyAnimation, QTimer
+from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QPropertyAnimation, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QImage, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -15,7 +16,9 @@ from PySide6.QtWidgets import (
     QGraphicsOpacityEffect,
     QGridLayout,
     QHBoxLayout,
+    QDialog,
     QLabel,
+    QLineEdit,
     QMenu,
     QMainWindow,
     QProgressBar,
@@ -34,7 +37,8 @@ from src.modules.growth import GrowthPage
 from src.modules.interaction import InteractionPage
 from src.modules.notification import NotificationPage
 from src.modules.settings import SettingsPage
-from src.pet_data import PetDataStore
+from src.llm_client import LLMClient, build_pet_system_prompt
+from src.pet_data import ITEM_CATALOG, PetDataStore
 from src.pet_window import PolarBearPetWindow
 
 
@@ -629,8 +633,146 @@ class CareIndexDial(QWidget):
         painter.drawText(QRectF(rect.left() + 15, rect.top() + 174, rect.width() - 30, 42), Qt.AlignTop | Qt.AlignHCenter | Qt.TextWordWrap, self._note)
 
 
+class PetChatDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("和北极熊说话")
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setModal(True)
+        self.setWindowOpacity(0.96)
+        self.setFixedSize(372, 158)
+
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(10, 10, 10, 10)
+        outer_layout.setSpacing(0)
+
+        shell = QFrame()
+        shell.setObjectName("petChatShell")
+        shadow = QGraphicsDropShadowEffect(shell)
+        shadow.setBlurRadius(24)
+        shadow.setOffset(0, 7)
+        shadow.setColor(QColor(78, 164, 196, 62))
+        shell.setGraphicsEffect(shadow)
+        shell_layout = QVBoxLayout(shell)
+        shell_layout.setContentsMargins(16, 12, 16, 14)
+        shell_layout.setSpacing(9)
+
+        title_row = QHBoxLayout()
+        title_row.setSpacing(10)
+        title_block = QVBoxLayout()
+        title_block.setSpacing(2)
+        title = QLabel("和小熊说话")
+        title.setObjectName("petChatTitle")
+        subtitle = QLabel("输入一句话，小熊会轻轻回应你")
+        subtitle.setObjectName("petChatSubtitle")
+        title_block.addWidget(title)
+        title_block.addWidget(subtitle)
+        close_button = QPushButton("X")
+        close_button.setObjectName("petChatClose")
+        close_button.setCursor(Qt.PointingHandCursor)
+        close_button.clicked.connect(self.reject)
+        title_row.addLayout(title_block, 1)
+        title_row.addWidget(close_button, 0, Qt.AlignTop)
+
+        input_row = QHBoxLayout()
+        input_row.setSpacing(10)
+        self.input = QLineEdit()
+        self.input.setObjectName("petChatInput")
+        self.input.setPlaceholderText("想和北极熊说什么...")
+        self.input.returnPressed.connect(self.accept)
+        send_button = QPushButton("发送")
+        send_button.setObjectName("petChatSend")
+        send_button.setCursor(Qt.PointingHandCursor)
+        send_button.clicked.connect(self.accept)
+        input_row.addWidget(self.input, 1)
+        input_row.addWidget(send_button, 0)
+
+        shell_layout.addLayout(title_row)
+        shell_layout.addLayout(input_row)
+        outer_layout.addWidget(shell)
+        self.setStyleSheet(
+            """
+            QFrame#petChatShell {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 255, 255, 228),
+                    stop:0.52 rgba(232, 250, 255, 218),
+                    stop:1 rgba(255, 232, 244, 214));
+                border: 1px solid rgba(126, 232, 255, 190);
+                border-radius: 20px;
+            }
+            QLabel#petChatTitle {
+                color: #204a61;
+                font-size: 18px;
+                font-weight: 900;
+            }
+            QLabel#petChatSubtitle {
+                color: #5f8295;
+                font-size: 11px;
+                font-weight: 700;
+            }
+            QPushButton#petChatClose {
+                min-width: 28px;
+                max-width: 28px;
+                min-height: 28px;
+                max-height: 28px;
+                color: #54b9d0;
+                background: rgba(255, 255, 255, 190);
+                border: 1px solid rgba(126, 232, 255, 180);
+                border-radius: 14px;
+                font-weight: 900;
+            }
+            QPushButton#petChatClose:hover {
+                color: white;
+                background: #ff9fc3;
+            }
+            QLineEdit#petChatInput {
+                min-height: 38px;
+                color: #244f67;
+                background: rgba(255, 255, 255, 232);
+                border: 1px solid rgba(177, 231, 244, 230);
+                border-radius: 16px;
+                padding: 2px 14px;
+                font-size: 13px;
+                font-weight: 700;
+            }
+            QLineEdit#petChatInput:focus {
+                border: 2px solid #71d8ed;
+                background: white;
+            }
+            QPushButton#petChatSend {
+                min-width: 68px;
+                min-height: 40px;
+                color: white;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #55c3e5, stop:0.55 #82ded2, stop:1 #ff9fc3);
+                border: 1px solid rgba(255, 255, 255, 230);
+                border-radius: 16px;
+                font-size: 13px;
+                font-weight: 900;
+            }
+            QPushButton#petChatSend:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #49b7df, stop:0.52 #76d8cb, stop:1 #ff86b8);
+            }
+            """
+        )
+        self.input.setFocus()
+
+    def accept(self):
+        if not self.text_value():
+            self.input.setFocus()
+            return
+        super().accept()
+
+    def text_value(self):
+        return self.input.text().strip()
+
+
 class PolarBearPetApp(QMainWindow):
     """北极熊桌宠桌面应用主窗口。"""
+
+    pet_chat_reply_ready = Signal(str, str)
 
     def __init__(self):
         super().__init__()
@@ -688,6 +830,8 @@ class PolarBearPetApp(QMainWindow):
         self._pet_user_hidden = False
         self._pet_avoid_animation = None
         self._pet_overlay_sync_pending = False
+        self._pet_overlay_sync_paused = False
+        self._pet_overlay_sync_pause_token = 0
         self._pet_hotkey_text = (
             _normalized_hotkey_text(self.store.settings.get("pet_toggle_hotkey"))
             or DEFAULT_PET_TOGGLE_HOTKEY_TEXT
@@ -698,6 +842,7 @@ class PolarBearPetApp(QMainWindow):
         self._touch_burst_timer = QTimer(self)
         self._touch_burst_timer.setSingleShot(True)
         self._touch_burst_timer.timeout.connect(self._reset_touch_burst)
+        self.pet_chat_reply_ready.connect(self._deliver_pet_chat_reply)
         self._build_ui()
         self._build_tray()
         self._setup_pet_hotkeys()
@@ -1284,7 +1429,8 @@ class PolarBearPetApp(QMainWindow):
 
     def _play_pet_action(self, action_name, bubble=None):
         panel_visible = self.isVisible()
-        self.show_pet_window(activate=not panel_visible)
+        self._pause_pet_overlay_sync(3200 if bubble else 1200)
+        self.show_pet_window(activate=not panel_visible, sync_overlay=False)
         if action_name == "edge_left":
             self.pet_window.stick_to_edge("left")
         elif action_name == "edge_right":
@@ -1293,11 +1439,32 @@ class PolarBearPetApp(QMainWindow):
             self.pet_window.play_action(action_name)
         if bubble and self.store.settings.get("bubble_on", True):
             self.pet_window.show_bubble(bubble)
-        if panel_visible:
-            self._sync_pet_overlay_for_panel()
         self.pet_window.update()
 
+    def _pause_pet_overlay_sync(self, duration=900):
+        self._pet_overlay_sync_pause_token += 1
+        token = self._pet_overlay_sync_pause_token
+        self._pet_overlay_sync_paused = True
+        if self._pet_avoid_animation:
+            self._pet_avoid_animation.stop()
+            self._pet_avoid_animation = None
+        QTimer.singleShot(duration, lambda: self._resume_pet_overlay_sync(token))
+
+    def _resume_pet_overlay_sync(self, token):
+        if token != self._pet_overlay_sync_pause_token:
+            return
+        self._pet_overlay_sync_paused = False
+
     def _handle_pet_window_interaction(self, action_name):
+        if action_name == "pet_press":
+            self._pause_pet_overlay_sync(1400)
+            return
+        if action_name.startswith("choice:"):
+            self._handle_pet_choice(action_name.split(":", 1)[1])
+            return
+        if action_name == "quick_menu":
+            self._show_pet_quick_menu()
+            return
         if action_name == "show_panel":
             self._show_console()
             return
@@ -1331,6 +1498,395 @@ class PolarBearPetApp(QMainWindow):
         elif action_name == "drag_end":
             self._save_pet_position()
             self.store.add_log("互动", "拖拽结束，位置已更新。")
+        elif action_name == "corner_hide":
+            self.store.add_log("互动", "桌宠自己跑到角落里藏起来了。")
+        elif action_name == "corner_exit":
+            self.store.add_log("互动", "点击角落里的桌宠，它又出来陪伴了。")
+
+    def _show_pet_quick_menu(self):
+        self._pause_pet_overlay_sync(1800)
+        self.pet_window.show_choice_bubble(
+            "想做什么？",
+            (
+                ("chat", "聊天"),
+                ("feed", "喂食"),
+                ("actions", "动作"),
+                ("course", "课程"),
+                ("touch", "摸头"),
+                ("panel", "面板"),
+            ),
+        )
+
+    def _handle_pet_choice(self, key):
+        if key.startswith("feed:"):
+            item_id = key.split(":", 1)[1]
+            if item_id == "smart":
+                self._smart_feed_from_pet()
+            else:
+                self._feed_pet_item(item_id)
+            return
+        if key == "buy_food":
+            self._buy_recommended_food_from_pet()
+            return
+        if key.startswith("action:"):
+            self._run_pet_action_choice(key.split(":", 1)[1])
+            return
+        if key.startswith("chat:"):
+            self._run_pet_chat_choice(key.split(":", 1)[1])
+            return
+        if key == "back":
+            self._show_pet_quick_menu()
+            return
+        self._handle_pet_quick_action(key)
+
+    def _handle_pet_quick_action(self, key):
+        if key == "chat":
+            self._show_pet_chat_menu()
+        elif key == "feed":
+            self._show_pet_feed_menu()
+        elif key == "actions":
+            self._show_pet_action_menu()
+        elif key == "course":
+            self._show_pet_course_hint()
+        elif key == "touch":
+            self.store.touch()
+            self._register_touch_burst()
+            self._play_pet_action("touch", "摸摸头，心情变好了。")
+        elif key == "walk":
+            action = random.choice(["walk_left", "walk_right"])
+            self.store.walk()
+            self._play_pet_action(action, "出去散步一小段。")
+        elif key == "sleep":
+            self.store.rest()
+            self._play_pet_action("sleep", "开始休息，恢复一点体力。")
+        elif key == "panel":
+            self._open_panel_page(0, "控制面板已打开。")
+
+    def _style_pet_popup_menu(self, menu):
+        menu.setStyleSheet(
+            """
+            QMenu#petQuickMenu {
+                background: rgba(248, 253, 255, 245);
+                border: 1px solid rgba(104, 205, 232, 215);
+                border-radius: 12px;
+                padding: 8px;
+                color: #214d66;
+                font-size: 14px;
+                font-weight: 800;
+            }
+            QMenu#petQuickMenu::item {
+                padding: 9px 18px;
+                margin: 3px;
+                border-radius: 9px;
+            }
+            QMenu#petQuickMenu::item:selected {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #62cbe8, stop:0.55 #8ce2d3, stop:1 #ff9ec5);
+                color: white;
+            }
+            QMenu#petQuickMenu::item:disabled {
+                color: rgba(80, 120, 145, 120);
+            }
+            QMenu#petQuickMenu::separator {
+                height: 1px;
+                background: rgba(104, 205, 232, 120);
+                margin: 6px 8px;
+            }
+            """
+        )
+
+    def _pet_popup_position(self):
+        return self.pet_window.mapToGlobal(QPoint(self.pet_window.width() // 2, max(24, self.pet_window.height() // 5)))
+
+    def _pet_chat_dialog_position(self, dialog):
+        if hasattr(self.pet_window, "_visible_pet_screen_rect"):
+            pet_rect = self.pet_window._visible_pet_screen_rect(precise=True).toAlignedRect()
+        else:
+            pet_rect = self.pet_window.frameGeometry()
+        screen = QApplication.screenAt(pet_rect.center()) or QApplication.primaryScreen()
+        area = screen.availableGeometry().adjusted(10, 10, -10, -10) if screen else QRect(0, 0, 1920, 1080)
+        gap = max(22, round(34 * getattr(self.pet_window, "_scale", 0.6)))
+        size = dialog.size()
+        avoid_rect = pet_rect.adjusted(-gap, -gap, gap, gap)
+        head_y = pet_rect.top() + round(pet_rect.height() * 0.08)
+        mid_y = pet_rect.center().y() - size.height() // 2
+        candidates = [
+            QPoint(pet_rect.right() + gap, head_y),
+            QPoint(pet_rect.right() + gap, mid_y),
+            QPoint(pet_rect.left() - gap - size.width(), head_y),
+            QPoint(pet_rect.left() - gap - size.width(), mid_y),
+            QPoint(pet_rect.center().x() - size.width() // 2, pet_rect.top() - gap - size.height()),
+            QPoint(pet_rect.center().x() - size.width() // 2, pet_rect.bottom() + gap),
+            QPoint(pet_rect.right() - size.width(), pet_rect.top() - gap - size.height()),
+            QPoint(pet_rect.left(), pet_rect.bottom() + gap),
+        ]
+
+        def clamp(point):
+            max_x = area.left() + max(0, area.width() - size.width())
+            max_y = area.top() + max(0, area.height() - size.height())
+            x = max(area.left(), min(max_x, point.x()))
+            y = max(area.top(), min(max_y, point.y()))
+            return QPoint(x, y)
+
+        def rect_at(point):
+            return QRect(clamp(point), size)
+
+        def overlap_area(rect):
+            overlap = rect.intersected(avoid_rect)
+            if overlap.isNull():
+                return 0
+            return max(0, overlap.width()) * max(0, overlap.height())
+
+        def escape_points(point):
+            rect = rect_at(point)
+            if not rect.intersects(avoid_rect):
+                return [rect.topLeft()]
+            return [
+                QPoint(rect.left(), avoid_rect.top() - gap - size.height()),
+                QPoint(rect.left(), avoid_rect.bottom() + gap),
+                QPoint(avoid_rect.left() - gap - size.width(), rect.top()),
+                QPoint(avoid_rect.right() + gap, rect.top()),
+                QPoint(area.left(), avoid_rect.top() - gap - size.height()),
+                QPoint(area.left() + max(0, area.width() - size.width()), avoid_rect.bottom() + gap),
+            ]
+
+        scored = []
+        for point in candidates:
+            for escaped in escape_points(point):
+                escaped = clamp(escaped)
+                rect = QRect(escaped, size)
+                overlap = overlap_area(rect)
+                distance = (rect.center() - pet_rect.center()).manhattanLength()
+                above_or_side = 0 if rect.bottom() <= avoid_rect.top() or rect.left() >= avoid_rect.right() or rect.right() <= avoid_rect.left() else 1
+                scored.append((1 if overlap else 0, overlap, above_or_side, distance, escaped))
+        scored.sort(key=lambda item: item[:4])
+        return scored[0][4]
+
+    def _open_panel_page(self, index, bubble=None):
+        self._show_console()
+        self._switch_page(index)
+        if bubble:
+            self._show_bubble(bubble)
+
+    def _show_pet_feed_menu(self):
+        self._pause_pet_overlay_sync(1800)
+        options = [("feed:smart", "智能")]
+        short_names = {
+            "fish": "鱼干",
+            "milk": "牛奶",
+            "berry_cake": "蛋糕",
+            "ice": "冰块",
+        }
+        for item_id, item in ITEM_CATALOG.items():
+            if item.get("type") != "food":
+                continue
+            stock = int(self.store.inventory.get(item_id, 0))
+            options.append((f"feed:{item_id}", f"{short_names.get(item_id, item['name'][:2])}x{stock}"))
+        options.append(("buy_food", "购买"))
+        options.append(("back", "返回"))
+        self.pet_window.show_choice_bubble("想吃什么？", options)
+
+    def _smart_feed_from_pet(self):
+        food_ids = [
+            item_id
+            for item_id, item in ITEM_CATALOG.items()
+            if item.get("type") == "food" and self.store.inventory.get(item_id, 0) > 0
+        ]
+        if not food_ids:
+            self._show_bubble("背包里没有可喂的食物，可以点“购买推荐食物”。")
+            return
+        self._feed_pet_item(self._recommended_food_id(food_ids))
+
+    def _feed_pet_item(self, item_id):
+        ok, message = self.store.feed(item_id)
+        self._play_pet_action("touch" if ok else "idle", message)
+
+    def _buy_recommended_food_from_pet(self):
+        item_id = self._recommended_food_id(
+            [item_id for item_id, item in ITEM_CATALOG.items() if item.get("type") == "food"]
+        )
+        ok, message = self.store.buy_item(item_id)
+        self._play_pet_action("wave" if ok else "idle", message)
+
+    def _recommended_food_id(self, food_ids):
+        stats = self.store.stats
+        needs = {
+            "hunger": max(0, 100 - int(stats.get("hunger", 0))),
+            "mood": max(0, 100 - int(stats.get("mood", 0))),
+            "energy": max(0, 100 - int(stats.get("energy", 0))),
+            "affection": max(0, 100 - int(stats.get("affection", 0))) // 4,
+        }
+
+        def score(item_id):
+            effects = ITEM_CATALOG[item_id].get("effects", {})
+            return sum(max(0, int(effects.get(key, 0))) * value for key, value in needs.items())
+
+        return max(food_ids, key=score)
+
+    def _show_pet_action_menu(self):
+        self._pause_pet_overlay_sync(1800)
+        self.pet_window.show_choice_bubble(
+            "选个动作",
+            (
+                ("action:idle", "取消"),
+                ("action:wave", "挥手"),
+                ("action:touch", "互动"),
+                ("action:walk_left", "左走"),
+                ("action:walk_right", "右走"),
+                ("action:jump", "跳跃"),
+                ("action:sleep", "睡觉"),
+                ("back", "返回"),
+            ),
+        )
+
+    def _run_pet_action_choice(self, action_name):
+        if action_name in {"walk_left", "walk_right"}:
+            self.store.walk()
+        elif action_name == "sleep":
+            self.store.rest()
+        elif action_name == "jump":
+            self.store.adjust_stats({"mood": 4, "energy": -2})
+        elif action_name == "touch":
+            self.store.touch()
+            self._register_touch_burst()
+        labels = {
+            "wave": "挥手",
+            "touch": "互动",
+            "walk_left": "向左散步",
+            "walk_right": "向右散步",
+            "jump": "跳一下",
+            "sleep": "睡觉",
+            "edge_left": "贴左边",
+            "edge_right": "贴右边",
+            "idle": "取消动作",
+        }
+        self._play_pet_action(action_name, f"{labels.get(action_name, '动作')}。")
+
+    def _show_pet_chat_menu(self):
+        self._pause_pet_overlay_sync(1800)
+        self.pet_window.show_choice_bubble(
+            "想聊什么？",
+            (
+                ("chat:input", "输入"),
+                ("chat:encourage", "鼓励我"),
+                ("chat:course", "课程"),
+                ("chat:rest", "休息"),
+                ("chat:feed", "饿了吗"),
+                ("back", "返回"),
+            ),
+        )
+
+    def _run_pet_chat_choice(self, key):
+        if key == "input":
+            self._chat_from_pet()
+        elif key == "course":
+            self._show_pet_course_hint()
+        elif key == "rest":
+            self._deliver_pet_chat_reply("如果累了，我们短休一下吧。", "sleep")
+        elif key == "feed":
+            self._deliver_pet_chat_reply("可以喂我一点食物，我会更有精神。", "touch")
+        elif key == "encourage":
+            self._deliver_pet_chat_reply("别急，我们一点点来。你已经在推进了。", "wave")
+
+    def _show_pet_course_hint(self):
+        title, time_text, location = self.store.course_summary()
+        title = self._short_pet_text(title, 18)
+        location = self._short_pet_text(location, 20)
+        self._show_bubble(f"下一节课 {time_text}：《{title}》，地点：{location}。")
+
+    def _short_pet_text(self, text, limit):
+        text = " ".join(str(text or "").split())
+        if len(text) <= limit:
+            return text
+        return text[: limit - 1].rstrip() + "..."
+
+    def _chat_from_pet(self):
+        dialog = PetChatDialog(self.pet_window)
+        dialog.move(self._pet_chat_dialog_position(dialog))
+        if dialog.exec() != QDialog.Accepted:
+            return
+        text = dialog.text_value()
+        if not text:
+            return
+        self.store.add_chat_message("user", text)
+        client = LLMClient(self.store)
+        reason = client.unavailable_reason()
+        if reason is None:
+            self._show_bubble("我想一下。")
+            messages = self._pet_chat_messages()
+            threading.Thread(target=self._worker_pet_chat, args=(text, messages), daemon=True).start()
+            return
+        reply, action = self._local_pet_chat_reply(text)
+        self._deliver_pet_chat_reply(reply, action)
+
+    def _pet_chat_messages(self):
+        messages = []
+        for item in reversed(self.store.chat_history[:10]):
+            role = item.get("role")
+            if role == "bear":
+                role = "assistant"
+            elif role != "user":
+                continue
+            text = str(item.get("text") or "").strip()
+            if text:
+                messages.append({"role": role, "content": text})
+        return messages[-10:]
+
+    def _worker_pet_chat(self, user_text, messages):
+        try:
+            reply = LLMClient(self.store).chat(
+                messages,
+                system_prompt=build_pet_system_prompt(self.store),
+                timeout=24,
+            )
+            reply = reply or "我刚才有点卡住了，可以再说一次吗？"
+        except Exception:
+            reply, action = self._local_pet_chat_reply(user_text)
+        else:
+            action = self._pet_chat_action_for_text(f"{user_text} {reply}")
+        self.pet_chat_reply_ready.emit(reply, action)
+
+    def _local_pet_chat_reply(self, text):
+        text = text.strip()
+        action = self._pet_chat_action_for_text(text)
+        if any(word in text for word in ("饿", "吃", "喂", "食物")):
+            return "我有点想吃东西，可以点一下喂食。", "touch"
+        if any(word in text for word in ("累", "困", "睡", "休息")):
+            return "那我们短休一下吧，恢复体力比硬撑更重要。", "sleep"
+        if any(word in text for word in ("课", "上课", "提醒")):
+            title, time_text, location = self.store.course_summary()
+            return f"下一节课是 {time_text}《{title}》，地点在 {location}。", "wave"
+        if any(word in text for word in ("走", "散步", "运动")):
+            return "好呀，我陪你在屏幕上走一小段。", random.choice(["walk_left", "walk_right"])
+        return random.choice(
+            [
+                "我在这里陪你，慢慢来就好。",
+                "收到，今天也一起把事情一点点做完。",
+                "嗯嗯，我听见了。先照顾好状态，再继续往前。",
+            ]
+        ), action
+
+    def _pet_chat_action_for_text(self, text):
+        if any(word in text for word in ("睡", "困", "累", "休息")):
+            return "sleep"
+        if any(word in text for word in ("走", "散步", "运动")):
+            return random.choice(["walk_left", "walk_right"])
+        if any(word in text for word in ("开心", "鼓励", "加油", "你好")):
+            return "wave"
+        return "touch"
+
+    def _deliver_pet_chat_reply(self, reply, action):
+        self.store.add_chat_message("bear", reply)
+        if action == "sleep":
+            self.store.rest()
+        elif action in {"walk_left", "walk_right"}:
+            self.store.walk()
+        elif action == "touch":
+            self.store.touch()
+        self._play_pet_action(action if action in self.pet_window._actions else "idle")
+        if reply and self.store.settings.get("bubble_on", True):
+            self._pause_pet_overlay_sync(18000)
+            self.pet_window.show_bubble(reply, duration=7200, chat=True)
 
     def _register_touch_burst(self):
         self._touch_burst_count += 1
@@ -1355,6 +1911,7 @@ class PolarBearPetApp(QMainWindow):
 
     def _show_bubble(self, message):
         if message and self.store.settings.get("bubble_on", True):
+            self._pause_pet_overlay_sync(3200)
             self.pet_window.show_bubble(message)
 
     def _tick_pet_life(self):
@@ -1745,9 +2302,19 @@ class PolarBearPetApp(QMainWindow):
         if not self.pet_window.isVisible():
             return
         self.pet_window.set_always_on_top(bool(self.store.settings.get("always_on_top", True)))
+        if self._pet_overlay_sync_paused:
+            return
         if not self.isVisible():
             return
         if getattr(self.pet_window, "_is_dragging", False):
+            return
+        if getattr(self.pet_window, "_choice_options", None):
+            return
+        if getattr(self.pet_window, "_corner_hidden", False) or getattr(self.pet_window, "_corner_dot_mode", False):
+            return
+        if getattr(self.pet_window, "_bubble_text", ""):
+            return
+        if getattr(self.pet_window, "_action_name", "idle") not in {"idle", "__transition__"}:
             return
         if self._pet_overlaps_panel():
             panel = self._panel_safe_geometry()
@@ -1765,7 +2332,7 @@ class PolarBearPetApp(QMainWindow):
             else:
                 self._request_pet_overlay_sync(160)
 
-    def show_pet_window(self, checked=False, restore=True, activate=True):
+    def show_pet_window(self, checked=False, restore=True, activate=True, sync_overlay=True):
         was_visible = self.pet_window.isVisible()
         if restore and not was_visible:
             self._restore_pet_position()
@@ -1775,7 +2342,7 @@ class PolarBearPetApp(QMainWindow):
         if activate:
             self.pet_window.raise_()
             self.pet_window.activateWindow()
-        else:
+        elif sync_overlay:
             self._sync_pet_overlay_for_panel()
         self.pet_window.update()
         self._pet_user_hidden = False

@@ -27,6 +27,8 @@ pip install -r requirements.txt
 python main.py
 ```
 
+Windows 上也可以直接双击项目根目录的 `launch_polar_bear.vbs` 启动；如果已经创建桌面快捷方式，双击桌面的“北极熊桌宠”即可运行。
+
 启动后会出现两个窗口：
 
 - `北极熊桌宠控制台`：用于查看和操作五大模块。

@@ -1,9 +1,50 @@
 import threading
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 from src.llm_client import LLMClient, LLM_PROVIDERS, build_pet_system_prompt
+
+
+class ChatMessageText(QTextEdit):
+    def __init__(self, text, parent=None):
+        super().__init__(parent)
+        self.setObjectName("bubbleText")
+        self.setPlainText(str(text or ""))
+        self.setReadOnly(True)
+        self.setAcceptRichText(False)
+        self.setFrameShape(QFrame.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setMinimumWidth(180)
+        self.setMaximumWidth(620)
+        self.document().setDocumentMargin(0)
+        QTimer.singleShot(0, self.fit_to_content)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.fit_to_content()
+
+    def fit_to_content(self):
+        width = max(1, self.viewport().width())
+        self.document().setTextWidth(width)
+        height = max(24, int(self.document().size().height()) + 2)
+        self.setMinimumHeight(height)
+        self.setMaximumHeight(height)
 
 
 class ChatPage(QWidget):
@@ -189,10 +230,16 @@ class ChatPage(QWidget):
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setSpacing(8)
 
+        avatar = QLabel("我" if role == "user" else "熊")
+        avatar.setObjectName("chatAvatar")
+        avatar.setProperty("role", role)
+        avatar.setAlignment(Qt.AlignCenter)
+        avatar.setFixedSize(38, 38)
+
         bubble = QFrame()
         bubble.setObjectName("chatBubble")
         bubble.setProperty("role", role)
-        bubble.setMaximumWidth(720)
+        bubble.setMaximumWidth(680)
         bubble_layout = QVBoxLayout(bubble)
         bubble_layout.setContentsMargins(14, 10, 14, 11)
         bubble_layout.setSpacing(5)
@@ -201,19 +248,21 @@ class ChatPage(QWidget):
         meta = QLabel(f"{item.get('time', '--:--')}  {speaker}")
         meta.setObjectName("bubbleMeta")
         meta.setProperty("role", role)
-        text = QLabel(str(item.get("text", "")))
-        text.setWordWrap(True)
-        text.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        text.setObjectName("bubbleText")
+        text = ChatMessageText(item.get("text", ""))
         text.setProperty("role", role)
+        text.style().unpolish(text)
+        text.style().polish(text)
+        QTimer.singleShot(0, text.fit_to_content)
         bubble_layout.addWidget(meta)
         bubble_layout.addWidget(text)
 
         if role == "user":
             row_layout.addStretch(1)
-            row_layout.addWidget(bubble, 0, Qt.AlignRight)
+            row_layout.addWidget(bubble, 0, Qt.AlignRight | Qt.AlignTop)
+            row_layout.addWidget(avatar, 0, Qt.AlignTop)
         else:
-            row_layout.addWidget(bubble, 0, Qt.AlignLeft)
+            row_layout.addWidget(avatar, 0, Qt.AlignTop)
+            row_layout.addWidget(bubble, 0, Qt.AlignLeft | Qt.AlignTop)
             row_layout.addStretch(1)
         self.chat_messages_layout.addWidget(row)
 
@@ -291,7 +340,9 @@ class ChatPage(QWidget):
             self.store.touch()
         elif action in {"rest", "sleep"}:
             self.store.rest()
-        self.play_action(action if action in {"touch", "wave", "sleep"} else "idle", reply)
+        self.play_action(action if action in {"touch", "wave", "sleep"} else "idle", None)
+        if reply and self.store.settings.get("bubble_on", True):
+            self.pet_window.show_bubble(reply, duration=7200, chat=True)
 
     def _set_send_enabled(self, enabled):
         if self.send_button:
@@ -364,8 +415,15 @@ PAGE_STYLE = """
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 #ffffff, stop:1 #edfaff);
     border: 1px solid #c4e5ef;
-    border-radius: 8px;
+    border-radius: 18px;
     padding: 12px;
+}
+#chatPanel {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 rgba(255, 255, 255, 245),
+        stop:0.52 rgba(236, 251, 255, 238),
+        stop:1 rgba(255, 238, 247, 236));
+    border: 1px solid #aee4f1;
 }
 #cardTitle {
     color: #ff8ebc;
@@ -391,11 +449,11 @@ PAGE_STYLE = """
     background: #ffd374;
 }
 #chatScroll {
-    min-height: 340px;
+    min-height: 380px;
     background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-        stop:0 #f7fdff, stop:0.46 #ffffff, stop:1 #fff3f8);
+        stop:0 #edfaff, stop:0.46 #ffffff, stop:1 #fff2f8);
     border: 1px solid #bde8f4;
-    border-radius: 14px;
+    border-radius: 22px;
 }
 #chatMessages {
     background: transparent;
@@ -406,15 +464,32 @@ PAGE_STYLE = """
     font-weight: 800;
 }
 QFrame#chatBubble {
-    border-radius: 16px;
+    border-radius: 20px;
 }
 QFrame#chatBubble[role="bear"] {
-    background: rgba(255, 255, 255, 238);
+    background: rgba(255, 255, 255, 246);
     border: 1px solid #bde8f4;
 }
 QFrame#chatBubble[role="user"] {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
         stop:0 #62c8e7, stop:0.56 #89dfd1, stop:1 #ffabc8);
+    border: 1px solid #ffffff;
+}
+#chatAvatar {
+    border-radius: 19px;
+    font-size: 13px;
+    font-weight: 900;
+}
+#chatAvatar[role="bear"] {
+    color: #2f93ad;
+    background: qradialgradient(cx:0.32, cy:0.22, radius:0.9,
+        stop:0 #ffffff, stop:0.54 #e6fbff, stop:1 #beeef7);
+    border: 1px solid #aee4f1;
+}
+#chatAvatar[role="user"] {
+    color: #ffffff;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 #5dc7e6, stop:0.6 #8be0d2, stop:1 #ff9fc3);
     border: 1px solid #ffffff;
 }
 #bubbleMeta {
@@ -427,26 +502,30 @@ QFrame#chatBubble[role="user"] {
 #bubbleMeta[role="user"] {
     color: rgba(255, 255, 255, 210);
 }
-#bubbleText {
+QTextEdit#bubbleText {
+    background: transparent;
+    border: 0px;
+    padding: 0px;
     font-size: 15px;
 }
-#bubbleText[role="bear"] {
+QTextEdit#bubbleText[role="bear"] {
     color: #284f66;
 }
-#bubbleText[role="user"] {
+QTextEdit#bubbleText[role="user"] {
     color: #ffffff;
 }
 #chatInput {
-    min-height: 44px;
+    min-height: 48px;
     color: #31556b;
-    background: #ffffff;
+    background: rgba(255, 255, 255, 246);
     border: 1px solid #bde8f4;
-    border-radius: 16px;
+    border-radius: 20px;
     padding: 4px 14px;
-    font-size: 14px;
+    font-size: 15px;
+    font-weight: 700;
 }
 #chatInput:focus {
-    border-color: #64c9e8;
+    border: 2px solid #64c9e8;
 }
 QScrollBar:vertical {
     width: 10px;

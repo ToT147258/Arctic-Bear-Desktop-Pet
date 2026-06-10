@@ -5,8 +5,20 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QElapsedTimer, QTimer, Signal
-from PySide6.QtGui import QColor, QImage, QImageReader, QPainter, QPen, QPixmap, QTransform
+from PySide6.QtCore import (
+    QAbstractAnimation,
+    QEasingCurve,
+    QPoint,
+    QPointF,
+    QPropertyAnimation,
+    QRectF,
+    QSize,
+    Qt,
+    QElapsedTimer,
+    QTimer,
+    Signal,
+)
+from PySide6.QtGui import QColor, QFont, QImage, QImageReader, QLinearGradient, QPainter, QPen, QPixmap, QRadialGradient, QTransform
 from PySide6.QtWidgets import QApplication, QMenu, QWidget
 
 
@@ -72,6 +84,8 @@ class PolarBearPetWindow(QWidget):
         self._base_window_size = (420, 660)
         self._base_draw_rect = QRectF(30, 118, 360, 520)
         self._walk_visual_padding = 0
+        self._top_overlay_padding = 0
+        self._side_overlay_padding = 0
         self._content_width = 0
         self._content_height = 0
         self._scale = self._load_pet_scale()
@@ -84,7 +98,7 @@ class PolarBearPetWindow(QWidget):
         self._drag_hold_frame = None
         self._click_action_token = 0
         self._ignore_next_click_release = False
-        self._click_action_delay = 0
+        self._click_action_delay = max(260, min(650, QApplication.doubleClickInterval() + 50))
         self._actions = {}
         self._transition_action = None
         self._return_transitions = {}
@@ -97,11 +111,37 @@ class PolarBearPetWindow(QWidget):
         self._elapsed = 0
         self._move_x_remainder = 0.0
         self._walk_visual_offset_x = 0.0
+        self._pose_visual_offset = QPointF(0.0, 0.0)
+        self._pose_settle_cooldown_ms = 0
         self._screen_area_cache = None
         self._next_random_action = self._random_idle_delay()
+        self._next_roam_action = self._random_roam_delay()
+        self._next_corner_hide = self._random_corner_hide_delay()
+        self._corner_hidden = False
+        self._corner_hide_side = ""
+        self._corner_animation = None
+        self._corner_dot_mode = False
+        self._external_window_motion = False
         self._idle_events_until_sleep = random.randint(2, 4)
         self._random_action_pool = []
         self._bubble_text = ""
+        self._bubble_pages = []
+        self._bubble_page_index = 0
+        self._bubble_token = 0
+        self._bubble_is_chat = False
+        self._bubble_draw_rect = QRectF()
+        self._bubble_layout_side = ""
+        self._bubble_layout_width = 0.0
+        self._choice_title = ""
+        self._choice_options = []
+        self._choice_button_rects = []
+        self._choice_panel_rect = QRectF()
+        self._choice_pressing = False
+        self._choice_pressed_key = ""
+        self._choice_hover_key = ""
+        self._choice_progress = 0.0
+        self._choice_phase = 0.0
+        self._choice_repaint_elapsed = 0
         self._edge_snap_enabled = True
         self._edge_snap_threshold = 48
         self._edge_stick_side = None
@@ -193,14 +233,163 @@ class PolarBearPetWindow(QWidget):
         if threshold is not None:
             self._edge_snap_threshold = max(8, int(threshold))
 
-    def show_bubble(self, text, duration=2400):
-        self._bubble_text = str(text)
+    def show_bubble(self, text, duration=2400, chat=False):
+        anchor = self.visual_anchor_screen_point() if self.isVisible() else None
+        self._clear_choice_state()
+        self._bubble_token += 1
+        self._bubble_is_chat = bool(chat)
+        self._bubble_pages = self._split_bubble_text(text, chat=chat)
+        self._bubble_page_index = 0
+        self._bubble_text = self._bubble_pages[0] if self._bubble_pages else ""
+        self._bubble_draw_rect = QRectF()
+        self._bubble_layout_side = ""
+        self._bubble_layout_width = 0.0
+        if not self._bubble_text:
+            self._apply_overlay_padding(0, 0, anchor=anchor)
+            return
+        self._apply_overlay_padding(0, 0, anchor=anchor)
         self.update()
-        QTimer.singleShot(duration, self._clear_bubble)
+        self._schedule_bubble_timeout(self._bubble_token, duration)
 
-    def _clear_bubble(self):
+    def show_choice_bubble(self, title, options):
+        normalized = []
+        for key, label in options:
+            key = str(key or "").strip()
+            label = str(label or "").strip()
+            if key and label:
+                normalized.append((key, label[:12]))
+        if not normalized:
+            return
+        self._bubble_token += 1
+        self._bubble_text = ""
+        self._bubble_pages = []
+        self._bubble_page_index = 0
+        self._bubble_is_chat = False
+        self._bubble_draw_rect = QRectF()
+        self._bubble_layout_side = ""
+        self._bubble_layout_width = 0.0
+        self._choice_title = str(title or "想做什么？").strip()[:18]
+        self._choice_options = normalized[:8]
+        self._apply_overlay_padding(0, 0)
+        self._choice_button_rects = []
+        self._choice_panel_rect = QRectF(self.rect())
+        self._choice_pressing = False
+        self._choice_pressed_key = ""
+        self._choice_hover_key = ""
+        self._choice_progress = 0.0
+        self._choice_phase = 0.0
+        self._choice_repaint_elapsed = 0
+        self.update()
+
+    def _clear_choice_state(self):
+        self._choice_title = ""
+        self._choice_options = []
+        self._choice_button_rects = []
+        self._choice_panel_rect = QRectF()
+        self._choice_pressing = False
+        self._choice_pressed_key = ""
+        self._choice_hover_key = ""
+        self._choice_progress = 0.0
+        self._choice_repaint_elapsed = 0
+
+    def _choice_overlay_padding(self, count):
+        return max(132, round(250 * self._scale))
+
+    def _choice_side_overlay_padding(self):
+        return max(112, round(260 * self._scale))
+
+    def hide_choice_bubble(self):
+        if not self._choice_options:
+            return
+        self._clear_choice_state()
+        if not self._bubble_text:
+            self._apply_overlay_padding(0, 0)
+        self.update()
+
+    def _compact_bubble_text(self, text):
+        text = " ".join(str(text or "").split())
+        return text
+
+    def _split_bubble_text(self, text, chat=False):
+        text = self._compact_bubble_text(text)
+        if not text:
+            return []
+        limit = 56 if self._scale <= 0.55 else 76
+        if not chat:
+            limit = 70 if self._scale <= 0.55 else 96
+        if len(text) <= limit:
+            return [text]
+
+        parts = re.findall(r".+?[。！？!?；;，,、]|.+$", text)
+        pages = []
+        current = ""
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            while len(part) > limit:
+                chunk = part[:limit].rstrip()
+                part = part[limit:].lstrip()
+                if current:
+                    pages.append(current)
+                    current = ""
+                pages.append(chunk)
+            if not current:
+                current = part
+            elif len(current) + len(part) <= limit:
+                current += part
+            else:
+                pages.append(current)
+                current = part
+        if current:
+            pages.append(current)
+        return pages
+
+    def _bubble_overlay_padding(self, text):
+        base = 214 if self._bubble_is_chat else 170
+        lines = max(1, math.ceil(len(text) / (26 if self._scale <= 0.55 else 34)))
+        extra = min(3, lines - 1) * 28
+        return max(118, round((base + extra) * self._scale))
+
+    def _bubble_side_overlay_padding(self):
+        if self._bubble_is_chat:
+            return max(170, round(380 * self._scale))
+        return max(72, round(170 * self._scale))
+
+    def _schedule_bubble_timeout(self, token, duration):
+        timeout = max(1800, int(duration))
+        if self._bubble_is_chat:
+            timeout = max(6200, min(14000, timeout + len(self._bubble_text) * 70))
+        elif len(self._bubble_pages) > 1:
+            timeout = max(2800, min(7800, timeout + len(self._bubble_text) * 34))
+        QTimer.singleShot(timeout, lambda: self._advance_or_clear_bubble(token, duration))
+
+    def _advance_or_clear_bubble(self, token, duration):
+        if token != self._bubble_token:
+            return
+        if self._bubble_page_index + 1 < len(self._bubble_pages):
+            self._bubble_page_index += 1
+            self._bubble_text = self._bubble_pages[self._bubble_page_index]
+            self.update()
+            self._schedule_bubble_timeout(token, duration)
+            return
+        self._clear_bubble(token=token)
+
+    def _clear_bubble(self, token=None):
+        if token is None:
+            self._bubble_token += 1
+        elif token != self._bubble_token:
+            return
         if self._bubble_text:
             self._bubble_text = ""
+            self._bubble_pages = []
+            self._bubble_page_index = 0
+            self._bubble_is_chat = False
+            self._bubble_draw_rect = QRectF()
+            self._bubble_layout_side = ""
+            self._bubble_layout_width = 0.0
+            if not self._choice_options:
+                self._apply_overlay_padding(0, 0)
             self.update()
 
     def _clamp_scale(self, value):
@@ -214,15 +403,43 @@ class PolarBearPetWindow(QWidget):
         base_width, base_height = self._base_window_size
         self._content_width = round(base_width * self._scale)
         self._content_height = round(base_height * self._scale)
-        self._walk_visual_padding = max(120, round(220 * self._scale))
-        self.setFixedSize(self._content_width + self._walk_visual_padding * 2, self._content_height)
+        base_padding = max(260, round(560 * self._scale))
+        self._walk_visual_padding = base_padding + int(self._side_overlay_padding)
+        self.setFixedSize(self._content_width + self._walk_visual_padding * 2, self._content_height + self._top_overlay_padding)
         self._pet_draw_rect = QRectF(
             self._walk_visual_padding + round(self._base_draw_rect.x() * self._scale),
-            round(self._base_draw_rect.y() * self._scale),
+            self._top_overlay_padding + round(self._base_draw_rect.y() * self._scale),
             round(self._base_draw_rect.width() * self._scale),
             round(self._base_draw_rect.height() * self._scale),
         )
         self._pet_draw_center = self._pet_draw_rect.center()
+
+    def _set_top_overlay_padding(self, padding):
+        self._apply_overlay_padding(self._side_overlay_padding, padding)
+
+    def _set_side_overlay_padding(self, padding):
+        self._apply_overlay_padding(padding, self._top_overlay_padding)
+
+    def _apply_overlay_padding(self, side_padding=None, top_padding=None, anchor=None):
+        side_padding = self._side_overlay_padding if side_padding is None else max(0, int(side_padding))
+        top_padding = self._top_overlay_padding if top_padding is None else max(0, int(top_padding))
+        if side_padding == self._side_overlay_padding and top_padding == self._top_overlay_padding:
+            return
+        if anchor is None and self.isVisible():
+            anchor = self.visual_anchor_screen_point()
+        updates_enabled = self.updatesEnabled()
+        if updates_enabled:
+            self.setUpdatesEnabled(False)
+        try:
+            self._side_overlay_padding = side_padding
+            self._top_overlay_padding = top_padding
+            self._configure_geometry()
+            if anchor is not None:
+                self.restore_visual_anchor(anchor)
+        finally:
+            if updates_enabled:
+                self.setUpdatesEnabled(True)
+        self.update()
 
     def set_pet_scale(self, scale, persist=True):
         next_scale = self._clamp_scale(scale)
@@ -506,20 +723,20 @@ class PolarBearPetWindow(QWidget):
         self._deferred_load_queue = [name for name in priorities if name in self._actions and name != self._action_name]
         self._deferred_loading = bool(self._deferred_load_queue)
         if self._deferred_loading:
-            QTimer.singleShot(2200, self._load_next_deferred_action)
+            QTimer.singleShot(420, self._load_next_deferred_action)
 
     def _load_next_deferred_action(self):
         if not self._deferred_load_queue:
             self._deferred_loading = False
             return
-        if self._is_dragging or self._action_name not in {"idle", "__transition__"}:
-            QTimer.singleShot(520, self._load_next_deferred_action)
+        if not self.isVisible() or self._is_dragging or self._action_name not in {"idle", "__transition__"}:
+            QTimer.singleShot(360, self._load_next_deferred_action)
             return
         action_name = self._deferred_load_queue.pop(0)
-        if self.isVisible() and action_name != self._action_name:
+        if action_name != self._action_name:
             self._ensure_action_loaded(action_name)
             self._rebuild_return_transitions()
-        delay = 1100 if self._deferred_load_queue else 0
+        delay = 260 if self._deferred_load_queue else 0
         if delay:
             QTimer.singleShot(delay, self._load_next_deferred_action)
         else:
@@ -541,7 +758,32 @@ class PolarBearPetWindow(QWidget):
             self._timer.setInterval(interval)
 
     def _random_idle_delay(self):
-        return random.randint(36000, 68000)
+        return random.randint(22000, 38000)
+
+    def _random_roam_delay(self):
+        return random.randint(5200, 9800)
+
+    def _random_corner_hide_delay(self):
+        return random.randint(72000, 128000)
+
+    def _is_corner_animating(self):
+        return bool(
+            self._corner_animation
+            and self._corner_animation.state() == QAbstractAnimation.Running
+        )
+
+    def _autonomy_is_paused(self):
+        return bool(
+            self._is_dragging
+            or self._choice_options
+            or self._bubble_text
+            or self._is_corner_animating()
+        )
+
+    def _reset_autonomy_timers(self, roam_delay=None, hide_delay=None):
+        self._next_roam_action = int(roam_delay if roam_delay is not None else self._random_roam_delay())
+        self._next_random_action = self._random_idle_delay()
+        self._next_corner_hide = int(hide_delay if hide_delay is not None else self._random_corner_hide_delay())
 
     def _load_random_action_pool(self):
         name_map = {
@@ -565,6 +807,12 @@ class PolarBearPetWindow(QWidget):
                 if normalized in self._actions:
                     candidates.append(normalized)
             if candidates:
+                active_candidates = [name for name in candidates if name != "idle"]
+                if active_candidates:
+                    candidates = active_candidates
+                    weight *= 1.45
+                else:
+                    weight *= 0.25
                 pool.append((weight, candidates))
         self._random_action_pool = pool
 
@@ -583,7 +831,17 @@ class PolarBearPetWindow(QWidget):
 
         delta_ms = min(48, max(1, self._clock.restart()))
         self._elapsed += delta_ms
+        if self._pose_settle_cooldown_ms > 0:
+            self._pose_settle_cooldown_ms = max(0, self._pose_settle_cooldown_ms - delta_ms)
         should_update = False
+        if self._choice_options:
+            self._choice_phase = (self._choice_phase + delta_ms / 260.0) % (math.pi * 2)
+            if self._choice_progress < 1.0:
+                self._choice_progress = min(1.0, self._choice_progress + delta_ms / 180.0)
+            self._choice_repaint_elapsed += delta_ms
+            if self._choice_repaint_elapsed >= 34 or self._choice_progress < 1.0:
+                self._choice_repaint_elapsed = 0
+                should_update = True
 
         if action.move_x:
             move_interval = max(1, action.interval) * max(1, action.move_every_frames)
@@ -614,11 +872,37 @@ class PolarBearPetWindow(QWidget):
                         return
             should_update = True
 
-        if self._action_name == "idle":
+        if self._corner_hidden:
+            if self._corner_dot_mode:
+                self._choice_phase = (self._choice_phase + delta_ms / 520.0) % (math.pi * 2)
+                should_update = True
+            if should_update:
+                self.update()
+            return
+
+        if self._action_name == "idle" and not self._autonomy_is_paused():
+            self._next_corner_hide -= delta_ms
+            if self._next_corner_hide <= 0:
+                self.hide_in_corner()
+                return
+
+            self._next_roam_action -= delta_ms
+            if self._next_roam_action <= 0:
+                self._play_roam_action()
+                return
+
             self._next_random_action -= delta_ms
             if self._next_random_action <= 0:
                 self._play_random_action()
                 return
+
+        if (
+            self._action_name == "idle"
+            and not self._bubble_text
+            and self._pose_settle_cooldown_ms <= 0
+            and self._settle_pose_visual_offset(max_step=2)
+        ):
+            should_update = True
 
         if should_update:
             self.update()
@@ -651,6 +935,8 @@ class PolarBearPetWindow(QWidget):
     def _apply_action_move(self, dx):
         if not dx:
             return
+        if self._external_window_motion:
+            return
         if self._action_name in {"walk_left", "walk_right"} and self._walk_window_move:
             self._walk_visual_offset_x += dx
             if abs(self._walk_visual_offset_x) > self._walk_visual_safe_offset():
@@ -678,8 +964,42 @@ class PolarBearPetWindow(QWidget):
         moved_x = self._move_within_screen(commit_x, 0, turn_on_edge=not force)
         if moved_x:
             self._walk_visual_offset_x -= moved_x
-        if force or not moved_x:
+        if abs(self._walk_visual_offset_x) < 0.75:
             self._walk_visual_offset_x = 0.0
+        elif not moved_x and not force:
+            self._walk_visual_offset_x = 0.0
+
+    def _settle_pose_visual_offset(self, max_step=10):
+        if (
+            self._corner_dot_mode
+            or self._external_window_motion
+            or self._is_dragging
+            or self._choice_options
+        ):
+            return False
+        offset = getattr(self, "_pose_visual_offset", QPointF(0.0, 0.0))
+        if abs(offset.x()) < 0.75 and abs(offset.y()) < 0.75:
+            if abs(offset.x()) > 0.001 or abs(offset.y()) > 0.001:
+                self._pose_visual_offset = QPointF(0.0, 0.0)
+                return True
+            return False
+
+        def step(value):
+            if abs(value) < 0.75:
+                return 0
+            amount = int(round(value))
+            if amount == 0:
+                amount = 1 if value > 0 else -1
+            return max(-max_step, min(max_step, amount))
+
+        move_x = step(offset.x())
+        move_y = step(offset.y())
+        if not move_x and not move_y:
+            return False
+        self.move(self.x() + move_x, self.y() + move_y)
+        self._pose_visual_offset -= QPointF(move_x, move_y)
+        self._screen_area_cache = None
+        return True
 
     def _play_random_action(self):
         self._next_random_action = self._random_idle_delay()
@@ -698,6 +1018,194 @@ class PolarBearPetWindow(QWidget):
         if chosen == "idle":
             return
         self.play_action(chosen)
+
+    def _walk_direction_for_screen_position(self):
+        area = self._available_screen_area()
+        if not area:
+            return random.choice(["walk_left", "walk_right"])
+        rect = self._visible_pet_screen_rect(precise=True)
+        area_left = area.left()
+        area_right = area.left() + area.width()
+        center_x = rect.center().x()
+        if center_x < area_left + area.width() * 0.26:
+            return "walk_right"
+        if center_x > area_left + area.width() * 0.74:
+            return "walk_left"
+        return random.choice(["walk_left", "walk_right"])
+
+    def _play_roam_action(self):
+        self._next_roam_action = self._random_roam_delay()
+        if self._corner_hidden or self._autonomy_is_paused():
+            return
+        action_name = self._walk_direction_for_screen_position()
+        if action_name not in self._actions:
+            action_name = "walk_right" if "walk_right" in self._actions else "walk_left"
+        if action_name in self._actions:
+            self.play_action(action_name)
+
+    def _animate_window_to(self, target, duration=820, finished=None, external_motion=True):
+        target = QPoint(int(target.x()), int(target.y()))
+        if self._corner_animation:
+            self._corner_animation.stop()
+            self._corner_animation = None
+            self._external_window_motion = False
+        if (self.pos() - target).manhattanLength() <= 2:
+            self.move(target)
+            self._external_window_motion = False
+            if finished:
+                finished()
+            return
+        self._external_window_motion = bool(external_motion)
+        animation = QPropertyAnimation(self, b"pos", self)
+        animation.setStartValue(self.pos())
+        animation.setEndValue(target)
+        animation.setDuration(max(160, int(duration)))
+        animation.setEasingCurve(QEasingCurve.InOutCubic)
+
+        def clear_animation():
+            if self._corner_animation is animation:
+                self._corner_animation = None
+            self._external_window_motion = False
+
+        animation.finished.connect(clear_animation)
+        if finished:
+            animation.finished.connect(finished)
+        self._corner_animation = animation
+        animation.start()
+
+    def _corner_target_position(self, side, visible_ratio=0.18):
+        area = self._available_screen_area()
+        if not area:
+            return QPoint(self.x(), self.y())
+        rect = self._visible_pet_screen_rect(precise=True)
+        area_left = area.left()
+        area_right = area.left() + area.width()
+        area_bottom = area.top() + area.height()
+        next_x = self.x()
+        next_y = self.y()
+        if side == "left":
+            target_left = area_left - rect.width() * (1.0 - visible_ratio)
+            next_x += round(target_left - rect.left())
+        else:
+            target_right = area_right + rect.width() * (1.0 - visible_ratio)
+            next_x += round(target_right - rect.right())
+        target_bottom = area_bottom - max(8, round(12 * self._scale))
+        next_y += round(target_bottom - rect.bottom())
+        return QPoint(int(next_x), int(next_y))
+
+    def _corner_dot_size(self):
+        return max(54, min(76, round(92 * self._scale)))
+
+    def _corner_dot_target_position(self, side):
+        area = self._available_screen_area()
+        size = self._corner_dot_size()
+        if not area:
+            return QPoint(self.x(), self.y())
+        margin = max(10, round(16 * self._scale))
+        x = area.left() + margin if side == "left" else area.left() + area.width() - size - margin
+        y = area.top() + area.height() - size - margin
+        return QPoint(int(x), int(y))
+
+    def _enter_corner_dot_mode(self, side):
+        self._corner_dot_mode = True
+        self._external_window_motion = False
+        self._transition_action = None
+        self._action_name = "idle"
+        self._frame_index = 0
+        self._cycle_count = 0
+        self._walk_frame_count = 0
+        self._elapsed = 0
+        self._move_x_remainder = 0.0
+        self._walk_visual_offset_x = 0.0
+        self._pose_visual_offset = QPointF(0.0, 0.0)
+        size = self._corner_dot_size()
+        self.setFixedSize(size, size)
+        self.move(self._corner_dot_target_position(side))
+        self.update()
+
+    def _leave_corner_dot_mode(self, side):
+        if not self._corner_dot_mode:
+            return
+        self._corner_dot_mode = False
+        self._configure_geometry()
+        self._walk_visual_offset_x = 0.0
+        self._pose_visual_offset = QPointF(0.0, 0.0)
+        self.move(self._corner_target_position(side, visible_ratio=0.18))
+        self.update()
+
+    def _visible_return_position(self, side):
+        area = self._available_screen_area()
+        if not area:
+            return QPoint(self.x(), self.y())
+        rect = self._visible_pet_screen_rect(precise=True)
+        area_left = area.left()
+        area_right = area.left() + area.width()
+        area_top = area.top()
+        area_bottom = area.top() + area.height()
+        margin = max(18, round(34 * self._scale))
+        next_x = self.x()
+        next_y = self.y()
+        if side == "left":
+            next_x += round(area_left + margin - rect.left())
+        else:
+            next_x += round(area_right - margin - rect.right())
+        if rect.bottom() > area_bottom - margin:
+            next_y += round(area_bottom - margin - rect.bottom())
+        if rect.top() < area_top + margin:
+            next_y += round(area_top + margin - rect.top())
+        return QPoint(int(next_x), int(next_y))
+
+    def hide_in_corner(self):
+        if self._corner_hidden or self._is_dragging or self._choice_options:
+            return False
+        area = self._available_screen_area()
+        if not area:
+            return False
+        self.hide_choice_bubble()
+        self._clear_bubble()
+        rect = self._visible_pet_screen_rect(precise=True)
+        side = "left" if rect.center().x() <= area.left() + area.width() / 2 else "right"
+        self._corner_hidden = True
+        self._corner_hide_side = side
+        self._next_corner_hide = self._random_corner_hide_delay()
+        self._next_roam_action = self._random_roam_delay()
+        walk_action = "walk_left" if side == "left" else "walk_right"
+        if walk_action in self._actions:
+            self.play_action(walk_action, transition=False)
+        target = self._corner_target_position(side)
+
+        def finish_hide():
+            self._external_window_motion = False
+            self._enter_corner_dot_mode(side)
+            self._edge_stick_side = side
+            self.interaction_requested.emit("corner_hide")
+
+        self._animate_window_to(target, duration=1100, finished=finish_hide, external_motion=True)
+        return True
+
+    def reveal_from_corner(self):
+        if not self._corner_hidden and not self._is_corner_animating():
+            return False
+        side = self._corner_hide_side or self._edge_stick_side or "right"
+        if self._corner_animation:
+            self._corner_animation.stop()
+            self._corner_animation = None
+        self._external_window_motion = False
+        self._corner_hidden = False
+        self._corner_hide_side = ""
+        self._edge_stick_side = None
+        self._leave_corner_dot_mode(side)
+        self.play_action("wave" if "wave" in self._actions else "idle", transition=False)
+        target = self._visible_return_position(side)
+
+        def finish_reveal():
+            self._reset_autonomy_timers(roam_delay=random.randint(4500, 8500), hide_delay=self._random_corner_hide_delay())
+            if self.isVisible():
+                self.show_bubble("我出来啦。", duration=1600)
+            self.interaction_requested.emit("corner_exit")
+
+        self._animate_window_to(target, duration=620, finished=finish_reveal, external_motion=True)
+        return True
 
     def _blend_pixmaps(self, left, right, ratio):
         blended = QPixmap(left.size())
@@ -764,8 +1272,10 @@ class PolarBearPetWindow(QWidget):
         transition = self._return_transitions.get(source_action_name)
         if not transition:
             return False
+        anchor = self.visual_anchor_screen_point() if self.isVisible() else None
         if source_action_name in {"walk_left", "walk_right"}:
-            self._commit_walk_visual_offset(force=True)
+            self._walk_visual_offset_x = 0.0
+            self._pose_settle_cooldown_ms = max(self._pose_settle_cooldown_ms, 1100)
         self._transition_action = transition
         self._action_name = "__transition__"
         self._sync_timer_interval(transition)
@@ -774,8 +1284,11 @@ class PolarBearPetWindow(QWidget):
         self._walk_frame_count = 0
         self._elapsed = max(0, transition.interval - 16)
         self._move_x_remainder = 0.0
+        self._pose_visual_offset = QPointF(0.0, 0.0)
         if hasattr(self, "_clock"):
             self._clock.restart()
+        if anchor is not None:
+            self.align_visual_anchor_inside_window(anchor)
         self.update()
         return True
 
@@ -784,6 +1297,7 @@ class PolarBearPetWindow(QWidget):
             return
         if self._is_dragging and action_name != "idle":
             return
+        anchor = self.visual_anchor_screen_point() if self.isVisible() else None
         was_edge_side = self._edge_stick_side
         if action_name == "edge_left":
             self._edge_stick_side = "left"
@@ -791,8 +1305,7 @@ class PolarBearPetWindow(QWidget):
             self._edge_stick_side = "right"
         else:
             self._edge_stick_side = None
-        if self._action_name in {"walk_left", "walk_right"} and action_name != self._action_name:
-            self._commit_walk_visual_offset(force=True)
+        reset_walk_visual_offset = self._action_name in {"walk_left", "walk_right"} and action_name != self._action_name
         if transition and action_name == "sleep" and "sleep_prepare" in self._actions:
             action_name = "sleep_prepare"
         action = self._ensure_action_loaded(action_name)
@@ -810,6 +1323,10 @@ class PolarBearPetWindow(QWidget):
         self._cycle_count = 0
         self._walk_frame_count = 0
         self._move_x_remainder = 0.0
+        if reset_walk_visual_offset:
+            self._walk_visual_offset_x = 0.0
+            self._pose_settle_cooldown_ms = max(self._pose_settle_cooldown_ms, 700)
+        self._pose_visual_offset = QPointF(0.0, 0.0)
         self._prime_action_timing(action_name, action)
         if hasattr(self, "_clock"):
             self._clock.restart()
@@ -817,6 +1334,9 @@ class PolarBearPetWindow(QWidget):
             next_x, next_y = self.fit_position_to_visible_screen(self.x(), self.y())
             if next_x != self.x() or next_y != self.y():
                 self.move(next_x, next_y)
+                anchor = None
+        if anchor is not None:
+            self.align_visual_anchor_inside_window(anchor)
         self.update()
 
     def _begin_drag_hold(self):
@@ -836,6 +1356,7 @@ class PolarBearPetWindow(QWidget):
         self._elapsed = 0
         self._move_x_remainder = 0.0
         self._walk_visual_offset_x = 0.0
+        self._pose_visual_offset = QPointF(0.0, 0.0)
         if hasattr(self, "_clock"):
             self._clock.restart()
         self.update()
@@ -848,6 +1369,7 @@ class PolarBearPetWindow(QWidget):
         return self._screen_area_cache
 
     def _turn_walk_direction(self):
+        anchor = self.visual_anchor_screen_point() if self.isVisible() else None
         if self._action_name == "walk_left":
             next_name = "walk_right"
         elif self._action_name == "walk_right":
@@ -867,6 +1389,9 @@ class PolarBearPetWindow(QWidget):
         self._walk_frame_count = 0
         self._move_x_remainder = 0.0
         self._walk_visual_offset_x = 0.0
+        self._pose_visual_offset = QPointF(0.0, 0.0)
+        if anchor is not None:
+            self.align_visual_anchor_inside_window(anchor)
         self.update()
         return True
 
@@ -923,13 +1448,20 @@ class PolarBearPetWindow(QWidget):
     def _frame_draw_rect(self, frame):
         logical_size = frame.deviceIndependentSize()
         return QRectF(
-            round(self._pet_draw_center.x() + self._walk_visual_offset_x - logical_size.width() / 2),
-            round(self._pet_draw_center.y() - logical_size.height() / 2),
+            round(
+                self._pet_draw_center.x()
+                + self._walk_visual_offset_x
+                + self._pose_visual_offset.x()
+                - logical_size.width() / 2
+            ),
+            round(self._pet_draw_center.y() + self._pose_visual_offset.y() - logical_size.height() / 2),
             logical_size.width(),
             logical_size.height(),
         )
 
     def _visible_pet_rect(self, precise=False):
+        if self._corner_dot_mode:
+            return QRectF(0, 0, self.width(), self.height())
         frame = self._current_frame()
         if frame and not frame.isNull():
             draw_rect = self._frame_draw_rect(frame)
@@ -952,6 +1484,29 @@ class PolarBearPetWindow(QWidget):
         x = self.x() if window_x is None else int(window_x)
         y = self.y() if window_y is None else int(window_y)
         return self._visible_pet_rect(precise=precise).translated(x, y)
+
+    def visual_anchor_screen_point(self, precise=True):
+        rect = self._visible_pet_screen_rect(precise=precise)
+        return QPointF(rect.center().x(), rect.bottom())
+
+    def restore_visual_anchor(self, anchor, precise=True):
+        if anchor is None:
+            return
+        current = self.visual_anchor_screen_point(precise=precise)
+        dx = round(anchor.x() - current.x())
+        dy = round(anchor.y() - current.y())
+        if dx or dy:
+            self.move(self.x() + dx, self.y() + dy)
+            self._screen_area_cache = None
+
+    def align_visual_anchor_inside_window(self, anchor, precise=True):
+        if anchor is None:
+            return
+        current = self.visual_anchor_screen_point(precise=precise)
+        dx = anchor.x() - current.x()
+        dy = anchor.y() - current.y()
+        if abs(dx) > 0.5 or abs(dy) > 0.5:
+            self._pose_visual_offset += QPointF(dx, dy)
 
     def fit_position_to_visible_screen(self, x, y, margin=None, precise=False):
         area = self._available_screen_area()
@@ -1047,7 +1602,7 @@ class PolarBearPetWindow(QWidget):
         raw_y = self.y() + dy
         next_x, next_y = self.fit_position_to_visible_screen(raw_x, raw_y)
         hit_horizontal_edge = bool(dx and next_x != int(raw_x))
-        if hit_horizontal_edge and self._action_name in {"walk_left", "walk_right"}:
+        if turn_on_edge and hit_horizontal_edge and self._action_name in {"walk_left", "walk_right"}:
             self._walk_visual_offset_x = 0.0
             self._turn_walk_direction()
             return 0
@@ -1055,7 +1610,40 @@ class PolarBearPetWindow(QWidget):
         return next_x - old_x
 
     def mousePressEvent(self, event):
+        if event.button() in {Qt.LeftButton, Qt.RightButton} and (self._corner_hidden or self._is_corner_animating()):
+            self.interaction_requested.emit("pet_press")
+            self.reveal_from_corner()
+            self._ignore_next_click_release = True
+            event.accept()
+            return
+        if event.button() == Qt.RightButton and (self._choice_options or self._bubble_text):
+            self.interaction_requested.emit("pet_press")
+            self._reset_autonomy_timers(hide_delay=max(self._next_corner_hide, 65000))
+            self.hide_choice_bubble()
+            self._clear_bubble()
+            if self._action_name not in {"idle", "__transition__"}:
+                self.play_action("idle", transition=False)
+            self._ignore_next_click_release = True
+            event.accept()
+            return
+        if event.button() == Qt.RightButton and self._action_name not in {"idle", "__transition__"}:
+            self.interaction_requested.emit("pet_press")
+            self._reset_autonomy_timers(hide_delay=max(self._next_corner_hide, 65000))
+            self.play_action("idle", transition=False)
+            self._ignore_next_click_release = True
+            event.accept()
+            return
         if event.button() == Qt.LeftButton:
+            self.interaction_requested.emit("pet_press")
+            self._reset_autonomy_timers(hide_delay=max(self._next_corner_hide, 65000))
+            if self._choice_options:
+                self._choice_pressed_key = self._choice_key_at(event.position())
+                self._choice_pressing = bool(self._choice_pressed_key)
+                if not self._choice_pressing:
+                    self.hide_choice_bubble()
+                    self._ignore_next_click_release = True
+                event.accept()
+                return
             self._click_action_token += 1
             self._press_position = event.globalPosition().toPoint()
             self._drag_position = self._press_position - self.frameGeometry().topLeft()
@@ -1064,6 +1652,13 @@ class PolarBearPetWindow(QWidget):
             event.accept()
 
     def mouseMoveEvent(self, event):
+        if self._choice_options:
+            hover_key = self._choice_key_at(event.position())
+            if hover_key != self._choice_hover_key:
+                self._choice_hover_key = hover_key
+                self.update()
+            event.accept()
+            return
         if event.buttons() & Qt.LeftButton:
             current_position = event.globalPosition().toPoint()
             if not self._is_dragging:
@@ -1079,6 +1674,19 @@ class PolarBearPetWindow(QWidget):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
+            if self._choice_options:
+                key = self._choice_key_at(event.position()) if self._choice_pressing else ""
+                if key != self._choice_pressed_key:
+                    key = ""
+                self._choice_pressing = False
+                self._choice_pressed_key = ""
+                if key:
+                    self.hide_choice_bubble()
+                    self.interaction_requested.emit(f"choice:{key}")
+                else:
+                    self.hide_choice_bubble()
+                event.accept()
+                return
             if self._is_dragging:
                 self._is_dragging = False
                 self._click_action_token += 1
@@ -1100,7 +1708,13 @@ class PolarBearPetWindow(QWidget):
     def mouseDoubleClickEvent(self, event):
         self._click_action_token += 1
         self._ignore_next_click_release = True
-        self.play_action("wave")
+        if self._corner_hidden or self._is_corner_animating():
+            self.reveal_from_corner()
+            event.accept()
+            return
+        self._reset_autonomy_timers(hide_delay=max(self._next_corner_hide, 65000))
+        if self._action_name != "wave":
+            self.play_action("wave")
         self.interaction_requested.emit("wave")
         event.accept()
 
@@ -1115,8 +1729,17 @@ class PolarBearPetWindow(QWidget):
     def _play_click_action(self, token):
         if token != self._click_action_token or self._is_dragging:
             return
-        self.play_action("touch" if "touch" in self._actions else "wave", transition=False)
-        self.interaction_requested.emit("touch" if "touch" in self._actions else "wave")
+        self.interaction_requested.emit("quick_menu")
+
+    def _choice_key_at(self, point):
+        for key, _label, rect in self._choice_button_rects:
+            center = rect.center()
+            radius = rect.width() / 2
+            dx = point.x() - center.x()
+            dy = point.y() - center.y()
+            if dx * dx + dy * dy <= radius * radius:
+                return key
+        return ""
 
     def wheelEvent(self, event):
         if event.modifiers() & Qt.ControlModifier:
@@ -1188,8 +1811,11 @@ class PolarBearPetWindow(QWidget):
         painter.fillRect(self.rect(), Qt.transparent)
         painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
         painter.setRenderHint(QPainter.Antialiasing)
+        if self._corner_dot_mode:
+            self._draw_corner_dot(painter)
+            return
         scale = self._scale
-        content_left = self._walk_visual_padding + round(self._walk_visual_offset_x)
+        content_left = self._walk_visual_padding + round(self._walk_visual_offset_x + self._pose_visual_offset.x())
 
         if not self._is_edge_action():
             painter.setPen(Qt.NoPen)
@@ -1202,6 +1828,9 @@ class PolarBearPetWindow(QWidget):
         else:
             self._draw_static_hint(painter)
 
+        if self._choice_options:
+            self._draw_choice_bubble(painter, content_left)
+            return
         if not self._bubble_text:
             return
         self._draw_bubble(painter, content_left)
@@ -1217,6 +1846,42 @@ class PolarBearPetWindow(QWidget):
     def _draw_frame(self, painter, frame):
         painter.drawPixmap(self._frame_draw_rect(frame).topLeft(), frame)
 
+    def _draw_corner_dot(self, painter):
+        size = min(self.width(), self.height())
+        rect = QRectF(4, 4, size - 8, size - 8)
+        pulse = 0.5 + 0.5 * math.sin((self._choice_phase or 0.0) * 0.8)
+
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(32, 82, 104, 58))
+        painter.drawEllipse(rect.adjusted(2, 5, -2, 5))
+
+        glow = QRadialGradient(rect.center(), rect.width() * 0.72)
+        glow.setColorAt(0.0, QColor(255, 255, 255, 250))
+        glow.setColorAt(0.42, QColor(187, 245, 255, 238))
+        glow.setColorAt(0.76, QColor(113, 217, 237, 226))
+        glow.setColorAt(1.0, QColor(255, 164, 203, 220))
+        painter.setPen(QPen(QColor(126, 232, 255, 190 + int(42 * pulse)), max(1, round(2 * self._scale))))
+        painter.setBrush(glow)
+        painter.drawEllipse(rect)
+
+        highlight = QRectF(rect.left() + rect.width() * 0.24, rect.top() + rect.height() * 0.16, rect.width() * 0.34, rect.height() * 0.18)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(255, 255, 255, 160))
+        painter.drawEllipse(highlight)
+
+        paw_color = QColor(36, 86, 111, 190)
+        painter.setBrush(paw_color)
+        painter.setPen(Qt.NoPen)
+        cx = rect.center().x()
+        cy = rect.center().y() + rect.height() * 0.10
+        pad = rect.width() * 0.065
+        painter.drawEllipse(QRectF(cx - pad * 1.55, cy - pad * 0.55, pad * 3.1, pad * 2.35))
+        for dx, dy in ((-2.1, -2.1), (-0.7, -2.7), (0.7, -2.7), (2.1, -2.1)):
+            painter.drawEllipse(QRectF(cx + dx * pad - pad * 0.52, cy + dy * pad - pad * 0.52, pad * 1.04, pad * 1.04))
+        painter.restore()
+
     def _is_edge_action(self):
         return self._action_name in {"edge_left", "edge_right"}
 
@@ -1225,7 +1890,7 @@ class PolarBearPetWindow(QWidget):
             self._draw_frame(painter, self.fallback_pixmap)
         painter.setPen(QPen(QColor(126, 232, 255), 1))
         painter.setBrush(QColor(12, 24, 38, 185))
-        content_left = self._walk_visual_padding + round(self._walk_visual_offset_x)
+        content_left = self._walk_visual_padding + round(self._walk_visual_offset_x + self._pose_visual_offset.x())
         painter.drawRoundedRect(QRectF(content_left + round(44 * self._scale), self.height() - 76 * self._scale, self._content_width - round(88 * self._scale), 38 * self._scale), 10, 10)
         painter.setPen(QColor(222, 248, 255))
         painter.drawText(
@@ -1234,71 +1899,299 @@ class PolarBearPetWindow(QWidget):
             "请放入真实动画帧：assets/polar_bear/real_actions",
         )
 
+    def _draw_choice_bubble(self, painter, content_left):
+        scale = self._scale
+        margin = max(10, round(18 * scale))
+        pet_rect = self._visible_pet_rect()
+        count = len(self._choice_options)
+        button_size = max(56, round(84 * scale))
+        title_width = max(150, round(230 * scale))
+        title_height = max(34, round(44 * scale))
+        center_x = pet_rect.center().x()
+        center_y = pet_rect.top() + pet_rect.height() * 0.31
+        max_radius_x = max(button_size * 1.25, self.width() / 2 - margin - button_size / 2)
+        radius_x = min(max_radius_x, max(button_size * 1.55, pet_rect.width() * 0.68 + button_size * 0.9))
+        radius_y = max(button_size * 1.15, min(self.height() * 0.28, pet_rect.height() * 0.30 + button_size * 0.55))
+        angle_sets = {
+            1: [-90],
+            2: [-132, -48],
+            3: [-148, -90, -32],
+            4: [-156, -108, -58, -10],
+            5: [-166, -126, -86, -45, -4],
+            6: [-168, -132, -96, -60, -24, 18],
+            7: [-172, -138, -104, -70, -36, -2, 38],
+            8: [-174, -142, -110, -78, -46, -14, 24, 62],
+        }
+        angles = angle_sets.get(count, angle_sets[8])
+        ease = 1 - pow(1 - self._choice_progress, 3)
+        pop_scale = 0.58 + 0.42 * ease
+        self._choice_button_rects = []
+
+        painter.save()
+        painter.setOpacity(0.65 + 0.35 * ease)
+        orbit_rect = QRectF(
+            center_x - radius_x - button_size * 0.55,
+            center_y - radius_y - button_size * 0.55,
+            radius_x * 2 + button_size * 1.1,
+            radius_y * 2 + button_size * 1.1,
+        )
+        halo = QRadialGradient(QPointF(center_x, center_y), max(radius_x, radius_y) + button_size)
+        halo.setColorAt(0.0, QColor(255, 255, 255, 12))
+        halo.setColorAt(0.56, QColor(126, 232, 255, 28))
+        halo.setColorAt(0.82, QColor(255, 173, 200, 24))
+        halo.setColorAt(1.0, QColor(255, 255, 255, 0))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(halo)
+        painter.drawEllipse(orbit_rect)
+
+        pulse = 0.5 + 0.5 * math.sin(self._choice_phase * 0.9)
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(QColor(255, 255, 255, 92), max(1, round(2.2 * scale))))
+        painter.drawEllipse(orbit_rect.adjusted(button_size * 0.18, button_size * 0.18, -button_size * 0.18, -button_size * 0.18))
+        painter.setPen(QPen(QColor(126, 232, 255, 74 + int(46 * pulse)), max(1, round(1.4 * scale))))
+        painter.drawEllipse(orbit_rect.adjusted(button_size * 0.34, button_size * 0.34, -button_size * 0.34, -button_size * 0.34))
+
+        title_rect = QRectF(
+            center_x - title_width / 2,
+            max(margin, center_y - radius_y - button_size * 0.94 - title_height),
+            title_width,
+            title_height,
+        )
+        title_shadow = QRectF(title_rect).adjusted(0, max(2, round(4 * scale)), 0, max(2, round(4 * scale)))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(53, 106, 135, 34))
+        painter.drawRoundedRect(title_shadow, title_height / 2, title_height / 2)
+        title_gradient = QLinearGradient(title_rect.topLeft(), title_rect.bottomRight())
+        title_gradient.setColorAt(0.0, QColor(255, 255, 255, 244))
+        title_gradient.setColorAt(0.48, QColor(227, 250, 255, 232))
+        title_gradient.setColorAt(1.0, QColor(255, 229, 241, 228))
+        painter.setPen(QPen(QColor(126, 232, 255, 185), 1.4))
+        painter.setBrush(title_gradient)
+        painter.drawRoundedRect(title_rect, title_height / 2, title_height / 2)
+        painter.setPen(QColor("#204a61"))
+        painter.setFont(QFont("Microsoft YaHei UI", max(10, round(12.5 * scale)), QFont.Black))
+        painter.drawText(title_rect, Qt.AlignCenter, self._choice_title)
+        union_rect = QRectF(title_rect).adjusted(-10, -10, 10, 10)
+
+        for index, (key, label) in enumerate(self._choice_options):
+            angle = math.radians(angles[index])
+            wave = math.sin(self._choice_phase + index * 0.72) * max(1.2, 4.2 * scale)
+            cx = center_x + math.cos(angle) * radius_x * pop_scale
+            cy = center_y + math.sin(angle) * radius_y * pop_scale + wave
+            hovered = key == self._choice_hover_key
+            size = button_size * (1.11 if hovered else 1.0)
+            rect = QRectF(cx - size / 2, cy - size / 2, size, size)
+            rect.moveLeft(max(margin, min(self.width() - margin - rect.width(), rect.left())))
+            rect.moveTop(max(margin, min(self.height() - margin - rect.height(), rect.top())))
+            self._choice_button_rects.append((key, label, QRectF(rect)))
+
+            connector_alpha = 74 if hovered else 38
+            painter.setPen(QPen(QColor(126, 232, 255, connector_alpha), max(1, round(1.1 * scale))))
+            painter.drawLine(QPointF(center_x, center_y), rect.center())
+
+            glow = QRadialGradient(rect.center(), rect.width() * 0.82)
+            glow.setColorAt(0.0, QColor(255, 255, 255, 0))
+            glow.setColorAt(0.55, QColor(126, 232, 255, 54 if hovered else 28))
+            glow.setColorAt(1.0, QColor(255, 142, 188, 84 if hovered else 36))
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(glow)
+            painter.drawEllipse(rect.adjusted(-10, -10, 10, 10))
+
+            glass = QRadialGradient(
+                QPointF(rect.left() + rect.width() * 0.32, rect.top() + rect.height() * 0.24),
+                rect.width() * 0.82,
+            )
+            if hovered:
+                glass.setColorAt(0.0, QColor(255, 255, 255, 250))
+                glass.setColorAt(0.36, QColor(116, 224, 238, 236))
+                glass.setColorAt(0.72, QColor(132, 225, 211, 230))
+                glass.setColorAt(1.0, QColor(255, 143, 188, 238))
+                border = QColor(255, 255, 255, 238)
+                text_color = QColor("#ffffff")
+                icon_color = QColor("#ffffff")
+            else:
+                glass.setColorAt(0.0, QColor(255, 255, 255, 252))
+                glass.setColorAt(0.42, QColor(233, 250, 255, 238))
+                glass.setColorAt(0.78, QColor(210, 244, 250, 226))
+                glass.setColorAt(1.0, QColor(255, 232, 243, 230))
+                border = QColor(138, 224, 241, 202)
+                text_color = QColor("#24536c")
+                icon_color = QColor("#46bcd8")
+            painter.setPen(QPen(border, 1.6 if hovered else 1.2))
+            painter.setBrush(glass)
+            painter.drawEllipse(rect)
+
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(255, 255, 255, 124))
+            painter.drawEllipse(
+                QRectF(
+                    rect.left() + rect.width() * 0.22,
+                    rect.top() + rect.height() * 0.12,
+                    rect.width() * 0.36,
+                    rect.height() * 0.18,
+                )
+            )
+
+            icon_rect = QRectF(
+                rect.left() + rect.width() * 0.30,
+                rect.top() + rect.height() * 0.22,
+                rect.width() * 0.40,
+                rect.height() * 0.30,
+            )
+            self._draw_choice_icon(painter, icon_rect, key, icon_color, hovered)
+
+            painter.setPen(text_color)
+            painter.setFont(QFont("Microsoft YaHei UI", max(8, round(9.2 * scale)), QFont.Black))
+            painter.drawText(
+                QRectF(rect.left() + 4, rect.top() + rect.height() * 0.56, rect.width() - 8, rect.height() * 0.34),
+                Qt.AlignCenter | Qt.TextWordWrap,
+                self._choice_display_label(label),
+            )
+            union_rect = union_rect.united(rect.adjusted(-14, -14, 14, 14))
+
+        self._choice_panel_rect = union_rect
+        painter.restore()
+
+    def _choice_display_label(self, label):
+        label = str(label or "").replace(" ", "")
+        return label if len(label) <= 4 else label[:4]
+
+    def _draw_choice_icon(self, painter, rect, key, color, hovered=False):
+        pen_width = max(1.3, rect.width() * 0.09)
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(color, pen_width, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.setBrush(Qt.NoBrush)
+        key = str(key)
+
+        if key.startswith("chat"):
+            bubble = rect.adjusted(rect.width() * 0.04, rect.height() * 0.08, -rect.width() * 0.04, -rect.height() * 0.14)
+            painter.drawRoundedRect(bubble, rect.width() * 0.18, rect.width() * 0.18)
+            painter.drawLine(QPointF(bubble.left() + bubble.width() * 0.34, bubble.bottom()), QPointF(bubble.left() + bubble.width() * 0.24, bubble.bottom() + rect.height() * 0.18))
+        elif key.startswith("feed") or key == "buy_food":
+            bowl = QRectF(rect.left(), rect.top() + rect.height() * 0.38, rect.width(), rect.height() * 0.44)
+            painter.drawArc(bowl, 180 * 16, 180 * 16)
+            painter.drawLine(QPointF(bowl.left() + bowl.width() * 0.16, bowl.center().y()), QPointF(bowl.right() - bowl.width() * 0.16, bowl.center().y()))
+            painter.drawEllipse(QRectF(rect.center().x() - rect.width() * 0.14, rect.top() + rect.height() * 0.10, rect.width() * 0.28, rect.height() * 0.24))
+        elif key == "course":
+            book = rect.adjusted(rect.width() * 0.08, rect.height() * 0.02, -rect.width() * 0.08, -rect.height() * 0.02)
+            painter.drawRoundedRect(book, rect.width() * 0.10, rect.width() * 0.10)
+            painter.drawLine(book.center().x(), book.top() + rect.height() * 0.10, book.center().x(), book.bottom() - rect.height() * 0.10)
+        elif key == "panel":
+            screen = rect.adjusted(rect.width() * 0.04, 0, -rect.width() * 0.04, -rect.height() * 0.12)
+            painter.drawRoundedRect(screen, rect.width() * 0.10, rect.width() * 0.10)
+            painter.drawLine(screen.left() + screen.width() * 0.20, screen.top() + screen.height() * 0.34, screen.right() - screen.width() * 0.18, screen.top() + screen.height() * 0.34)
+            painter.drawLine(screen.left() + screen.width() * 0.20, screen.top() + screen.height() * 0.62, screen.right() - screen.width() * 0.34, screen.top() + screen.height() * 0.62)
+        elif key == "back":
+            painter.drawLine(QPointF(rect.left() + rect.width() * 0.70, rect.top() + rect.height() * 0.18), QPointF(rect.left() + rect.width() * 0.30, rect.center().y()))
+            painter.drawLine(QPointF(rect.left() + rect.width() * 0.30, rect.center().y()), QPointF(rect.left() + rect.width() * 0.70, rect.bottom() - rect.height() * 0.18))
+            painter.drawLine(QPointF(rect.left() + rect.width() * 0.36, rect.center().y()), QPointF(rect.right() - rect.width() * 0.16, rect.center().y()))
+        elif key == "touch":
+            painter.drawEllipse(QRectF(rect.left() + rect.width() * 0.26, rect.top() + rect.height() * 0.08, rect.width() * 0.48, rect.height() * 0.42))
+            painter.drawLine(QPointF(rect.center().x(), rect.top() + rect.height() * 0.54), QPointF(rect.center().x(), rect.bottom() - rect.height() * 0.04))
+            painter.drawLine(QPointF(rect.left() + rect.width() * 0.18, rect.top() + rect.height() * 0.64), QPointF(rect.right() - rect.width() * 0.18, rect.top() + rect.height() * 0.64))
+        else:
+            cx = rect.center().x()
+            cy = rect.center().y()
+            radius_x = rect.width() * 0.34
+            radius_y = rect.height() * 0.34
+            painter.drawLine(QPointF(cx - radius_x, cy), QPointF(cx + radius_x, cy))
+            painter.drawLine(QPointF(cx, cy - radius_y), QPointF(cx, cy + radius_y))
+            painter.drawLine(QPointF(cx - radius_x * 0.58, cy - radius_y * 0.58), QPointF(cx + radius_x * 0.58, cy + radius_y * 0.58))
+            painter.drawLine(QPointF(cx + radius_x * 0.58, cy - radius_y * 0.58), QPointF(cx - radius_x * 0.58, cy + radius_y * 0.58))
+        painter.restore()
+
     def _draw_bubble(self, painter, content_left):
         scale = self._scale
-        margin = max(7, round(14 * scale))
+        margin = max(9, round(16 * scale))
         pet_rect = self._visible_pet_rect()
-        preferred_width = max(220, round(360 * scale))
-        preferred_width = min(preferred_width, max(120, self.width() - margin * 2))
-        min_width = max(112, round(132 * scale))
-        content_right = content_left + self._content_width
-        content_left_bound = max(margin, content_left + round(10 * scale))
-        content_right_bound = min(self.width() - margin, content_right - round(10 * scale))
-        if self._edge_stick_side not in {"left", "right"}:
-            content_left_bound = margin
-            content_right_bound = self.width() - margin
-        if content_right_bound - content_left_bound < min_width:
-            content_left_bound = margin
-            content_right_bound = self.width() - margin
-
-        bubble_width = min(preferred_width, max(min_width, content_right_bound - content_left_bound))
-        if self._edge_stick_side == "left":
-            bubble_x = pet_rect.right() + margin
-        elif self._edge_stick_side == "right":
-            bubble_x = pet_rect.left() - margin - bubble_width
-        else:
-            bubble_x = pet_rect.center().x() - bubble_width / 2
-        bubble_x = max(content_left_bound, min(content_right_bound - bubble_width, bubble_x))
-
+        gap = max(10, round(20 * scale))
+        preferred_width = max(250, round((560 if self._bubble_is_chat else 340) * scale))
+        min_width = max(220 if self._bubble_is_chat else 150, round((320 if self._bubble_is_chat else 210) * scale))
         text_margin = max(8, round(10 * scale))
-        text_width = max(1, bubble_width - text_margin * 2)
-        measured = painter.boundingRect(
-            QRectF(0, 0, text_width, 1000),
-            Qt.AlignCenter | Qt.TextWordWrap,
-            self._bubble_text,
-        )
-        bubble_height = max(max(38, round(48 * scale)), math.ceil(measured.height()) + text_margin * 2)
-        bubble_height = min(bubble_height, max(108, round(156 * scale)))
-        min_y = max(5, round(10 * scale))
-        max_y = self.height() - bubble_height - max(14, round(44 * scale))
-        if self._edge_stick_side in {"left", "right"}:
-            target_y = min_y
-        else:
-            target_y = pet_rect.top() - bubble_height - margin
-            if target_y < min_y:
-                target_y = min_y
-        bubble_y = max(min_y, min(target_y, max_y))
+        max_bubble_height = max(108 if self._bubble_is_chat else 82, min(self.height() - margin * 2, round((300 if self._bubble_is_chat else 150) * scale)))
+        text_font = QFont("Microsoft YaHei UI", max(9, round(11.4 * scale)), QFont.DemiBold if self._bubble_is_chat else QFont.Normal)
+        painter.setFont(text_font)
 
-        bubble_rect = QRectF(
-            bubble_x,
-            bubble_y,
-            bubble_width,
-            bubble_height,
-        )
-        if bubble_rect.intersects(pet_rect):
-            above_y = pet_rect.top() - bubble_height - margin
-            if above_y >= min_y:
-                bubble_y = above_y
+        def bubble_height(width):
+            text_width = max(1, width - text_margin * 2)
+            measured = painter.boundingRect(
+                QRectF(0, 0, text_width, 1000),
+                Qt.AlignCenter | Qt.TextWordWrap,
+                self._bubble_text,
+            )
+            height = max(max(50, round(62 * scale)), math.ceil(measured.height()) + text_margin * 2)
+            if self._bubble_is_chat:
+                height += max(10, round(14 * scale))
+            return min(height, max_bubble_height)
+
+        right_space = self.width() - pet_rect.right() - gap - margin
+        left_space = pet_rect.left() - gap - margin
+        max_width = max(min_width, self.width() - margin * 2)
+        side = self._bubble_layout_side
+        width = float(self._bubble_layout_width)
+        if not side or width <= 0:
+            if self._bubble_is_chat:
+                side = "right"
+                width = max(min_width, min(preferred_width, max(right_space, min_width)))
+            elif right_space >= min_width:
+                side = "right"
+                width = max(min_width, min(preferred_width, right_space))
+            elif left_space >= min_width:
+                side = "left"
+                width = max(min_width, min(preferred_width, left_space))
             else:
-                bubble_y = min_y
-            bubble_rect.moveTop(max(min_y, min(bubble_y, max_y)))
+                side = "center"
+                width = min(max(min_width, preferred_width), max_width)
+            self._bubble_layout_side = side
+            self._bubble_layout_width = float(width)
+        else:
+            width = max(min_width, min(width, max_width))
+
+        if side == "right":
+            x = pet_rect.right() + gap
+        elif side == "left":
+            x = pet_rect.left() - gap - width
+        else:
+            x = pet_rect.center().x() - width / 2
+        x = max(margin, min(self.width() - margin - width, x))
+        height = bubble_height(width)
+        head_y = pet_rect.top() + pet_rect.height() * (0.02 if self._bubble_is_chat else 0.11)
+        y = max(margin, min(self.height() - margin - height, head_y))
+        bubble_rect = QRectF(x, y, width, height)
+        self._bubble_draw_rect = QRectF(bubble_rect)
+
+        shadow_rect = QRectF(bubble_rect).adjusted(0, max(2, round(5 * scale)), 0, max(2, round(5 * scale)))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(13, 32, 48, 62))
+        painter.drawRoundedRect(shadow_rect, max(8, round(13 * scale)), max(8, round(13 * scale)))
 
         painter.setPen(QPen(QColor(126, 232, 255, 230), max(1, round(2 * scale))))
-        painter.setBrush(QColor(15, 42, 62, 232))
+        gradient = QLinearGradient(bubble_rect.topLeft(), bubble_rect.bottomRight())
+        gradient.setColorAt(0.0, QColor(18, 53, 76, 238))
+        gradient.setColorAt(0.56, QColor(17, 69, 91, 234))
+        gradient.setColorAt(1.0, QColor(26, 80, 96, 230))
+        painter.setBrush(gradient)
         painter.drawRoundedRect(bubble_rect, max(8, round(12 * scale)), max(8, round(12 * scale)))
         painter.setPen(QColor(235, 250, 255))
+        text_rect = bubble_rect.adjusted(text_margin, round(6 * scale), -text_margin, -round(6 * scale))
+        if len(self._bubble_pages) > 1:
+            text_rect.adjust(0, 0, 0, -max(13, round(16 * scale)))
         painter.drawText(
-            bubble_rect.adjusted(text_margin, round(4 * scale), -text_margin, -round(4 * scale)),
+            text_rect,
             Qt.AlignCenter | Qt.TextWordWrap,
             self._bubble_text,
         )
+        if len(self._bubble_pages) > 1:
+            painter.setPen(QColor(171, 232, 245))
+            painter.setFont(QFont("Microsoft YaHei UI", max(7, round(8.5 * scale)), QFont.Bold))
+            painter.drawText(
+                QRectF(
+                    bubble_rect.right() - max(42, round(50 * scale)),
+                    bubble_rect.bottom() - max(18, round(21 * scale)),
+                    max(34, round(42 * scale)),
+                    max(14, round(17 * scale)),
+                ),
+                Qt.AlignRight | Qt.AlignVCenter,
+                f"{self._bubble_page_index + 1}/{len(self._bubble_pages)}",
+            )
