@@ -1,4 +1,4 @@
-"""Compatibility entry for the refactored core module."""
+"""Application bootstrap and main control window."""
 
 from src.core.app import PolarBearPetApp
 

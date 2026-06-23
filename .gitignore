@@ -19,6 +19,9 @@ diagnostics/
 tmp_video_samples/
 tmp_video_edge_sheets/
 tmp_*.png
+deliverables/*
+!deliverables/北极熊桌宠项目_期末答辩PPT_20260623_004847.pptx
+!deliverables/北极熊桌宠项目_答辩讲稿提纲_20260623_004847.md
 data/save.json
 data/*.json
 data/*.tmp

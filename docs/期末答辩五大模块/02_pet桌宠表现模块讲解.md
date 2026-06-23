@@ -28,8 +28,6 @@ PolarBearPetWindow
 - 支持右下角圆点待机，让长时间未互动时桌宠收起来。
 - 通过锚点对齐、末帧保持、计时器限幅减少瞬移、抖动和掉帧。
 
-答辩时可以这样讲：
-
 > 这个模块不是简单让一张图片移动，而是用真实序列帧驱动北极熊动作。每个动作都封装成一个 `FrameAction`，窗口通过 Qt 定时器切换当前帧，再由 `paintEvent()` 绘制到透明窗口上，所以用户看到的是一个悬浮在桌面的北极熊。
 
 ## 二、演示流程
@@ -104,15 +102,15 @@ class FrameAction:
     frames: list[QPixmap]
     source_frames: list[QPixmap] = field(default_factory=list)
     frame_paths: list[Path] = field(default_factory=list)
-    repeat: int = 1
-    interval: int = 80
-    loop: bool = False
-    move_x: float = 0.0
-    base_move_x: float = 0.0
+    repeat: int = 1    //播放次数
+    interval: int = 80   //每一帧播放间隔（播放速度）
+    loop: bool = False    如：idel.loop = True
+    move_x: float = 0.0    //当前移动速度
+    base_move_x: float = 0.0    //基础移动速度
     next_action: str = "idle"
-    next_frame_index: int = 0
+    next_frame_index: int = 0   //切换下一个动作从第几帧开始播放
     max_cycles: int = 0
-    move_every_frames: int = 1
+    move_every_frames: int = 1     //每隔多少帧移动一次
 ```
 
 讲解逻辑：
@@ -134,43 +132,43 @@ class FrameAction:
 
 ```python
 class PolarBearPetWindow(QWidget):
-    interaction_requested = Signal(str)
+    interaction_requested = Signal(str)   //发送信号
 
     def __init__(self):
-        super().__init__()
+        super().__init__()   //调用父类初始化，继承QWidget(基础窗口组件)
         self.setWindowTitle("北极熊桌宠")
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setAutoFillBackground(False)
+        self.setAutoFillBackground(False)   //不让系统填充默认颜色
 
         self.asset_root = Path(__file__).resolve().parents[2] / "assets" / "polar_bear"
         self.role_root = self.asset_root / "role" / "PolarBear"
         self.real_action_root = self.asset_root / "real_actions"
 
-        self._scale = self._load_pet_scale()
-        self._configure_geometry()
+        self._scale = self._load_pet_scale()     //加载桌宠的缩放比例
+        self._configure_geometry()              //窗口的初始位置
 
         self._actions = {}
         self._action_name = "idle"
-        self._frame_index = 0
-        self._elapsed = 0
+        self._frame_index = 0                  //当前动作播放到哪一帧
+        self._elapsed = 0                      //时间
         self._move_x_remainder = 0.0
 
-        self._corner_hidden = False
+        self._corner_hidden = False           
         self._corner_dot_mode = False
-        self._bubble_text = ""
+        self._bubble_text = ""                 //保存气泡文字
         self._choice_options = []
 
         self._load_actions()
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._tick)
+        self._timer = QTimer(self)            //设置定时器
+        self._timer.timeout.connect(self._tick) 
         self._timer.start(16)
 ```
 
 讲解逻辑：
 
 - `Qt.FramelessWindowHint`：去掉系统边框。
-- `Qt.WindowStaysOnTopHint`：让桌宠一直显示在上层。
+- `Qt.WindowStaysOnTopHint`：让桌宠一直显示在上层。无论打开什么页面北极熊都能在页面之上
 - `Qt.WA_TranslucentBackground`：背景透明，只画北极熊和气泡。
 - `_actions` 保存全部动作。
 - `_action_name` 和 `_frame_index` 表示当前播放到哪个动作、哪一帧。
@@ -179,6 +177,20 @@ class PolarBearPetWindow(QWidget):
 答辩话术：
 
 > 控制面板和桌宠本体不是一个窗口。控制面板是管理界面，`PolarBearPetWindow` 才是真正在桌面上显示和运动的窗口。
+>
+> 1. 创建一个北极熊桌宠窗口
+> 2. 去掉窗口边框
+> 3. 设置窗口一直置顶
+> 4. 设置透明背景
+> 5. 找到北极熊资源文件夹
+> 6. 读取缩放比例
+> 7. 设置窗口大小和位置
+> 8. 初始化当前动作状态
+> 9. 初始化隐藏状态、气泡文字、选项列表
+> 10. 加载所有动作图片
+> 11. 创建定时器
+> 12. 每 16ms 调用一次 _tick()
+> 13. _tick() 负责更新动画帧、移动位置、重绘桌宠
 
 ### 3. 动作加载逻辑
 
@@ -308,7 +320,7 @@ def _tick(self):
         self._clock.restart()
         return
 
-    delta_ms = min(48, max(1, self._clock.restart()))
+    delta_ms = min(48, max(1, self._clock.restart())) //self._clock.restart() 会返回距离上次调用经过了多少毫秒，然后重新开始计时
     self._elapsed += delta_ms
 
     if action.move_x:
@@ -329,7 +341,7 @@ def _tick(self):
                         return
                     self.play_action(action.next_action, transition=False)
                     return
-
+//
     if self._action_name == "idle" and not self._autonomy_is_paused():
         self._next_corner_hide -= delta_ms
         self._next_roam_action -= delta_ms
